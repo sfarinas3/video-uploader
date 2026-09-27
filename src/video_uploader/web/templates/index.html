@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Upload{% endblock %}
+{% block content %}
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+
+{% if missed_jobs %}
+<section class="missed-banner">
+  <h2>Missed scheduled uploads</h2>
+  <p>The app wasn't running when these were due to publish. Choose an action for each:</p>
+  <table>
+    <thead>
+      <tr><th>Job</th><th>Platform</th><th>Was due</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for pj, upload_job in missed_jobs %}
+      <tr>
+        <td><a href="/jobs/{{ upload_job.id }}">#{{ upload_job.id }} — {{ upload_job.default_title }}</a></td>
+        <td>{{ pj.platform }}</td>
+        <td>{{ upload_job.scheduled_for }} UTC</td>
+        <td>
+          <form action="/jobs/platform/{{ pj.id }}/retry" method="post" style="display:inline">
+            <button type="submit">Upload now</button>
+          </form>
+          <a href="/jobs/{{ upload_job.id }}/reschedule">Reschedule</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<form action="/jobs" method="post" enctype="multipart/form-data">
+  <label>Video file
+    <input type="file" name="video" accept="video/*" required>
+  </label>
+
+  <label>Title
+    <input type="text" name="title" required>
+  </label>
+
+  <label>Description
+    <textarea name="description" rows="4"></textarea>
+  </label>
+
+  <label>Tags (comma-separated)
+    <input type="text" name="tags">
+  </label>
+
+  <label>Privacy
+    <select name="privacy">
+      <option value="private" selected>Private</option>
+      <option value="unlisted">Unlisted</option>
+      <option value="public">Public</option>
+    </select>
+  </label>
+
+  <fieldset>
+    <legend>Platforms</legend>
+    {% for platform in platforms %}
+    <label><input type="checkbox" name="platforms" value="{{ platform }}"> {{ platform }}</label>
+    {% endfor %}
+  </fieldset>
+
+  <fieldset>
+    <legend>When</legend>
+    <label><input type="radio" name="when" value="now" checked onclick="toggleSchedule(false)"> Publish now</label>
+    <label><input type="radio" name="when" value="schedule" onclick="toggleSchedule(true)"> Schedule for later</label>
+
+    <div id="schedule-fields" style="display:none">
+      <label>Date &amp; time
+        <input type="datetime-local" name="scheduled_at" id="scheduled_at">
+      </label>
+      <label>Timezone
+        <select name="scheduled_tz" id="scheduled_tz">
+          {% for tz in timezones %}
+          <option value="{{ tz }}">{{ tz }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+  </fieldset>
+
+  <p class="note">
+    Scheduled uploads fire automatically while the app is running. If the
+    app isn't running when one comes due, it's marked missed and you'll be
+    asked to upload now or reschedule the next time you open this page.
+  </p>
+
+  <button type="submit">Submit</button>
+</form>
+
+<script>
+  function toggleSchedule(show) {
+    document.getElementById('schedule-fields').style.display = show ? 'block' : 'none';
+  }
+  (function () {
+    try {
+      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      var select = document.getElementById('scheduled_tz');
+      if (tz && select.querySelector('option[value="' + tz + '"]')) {
+        select.value = tz;
+      }
+    } catch (e) {}
+  })();
+</script>
+{% endblock %}

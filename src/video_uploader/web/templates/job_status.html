@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Job status{% endblock %}
+{% block content %}
+{% if not jobs %}
+  <p>No jobs yet.</p>
+{% endif %}
+{% for job in jobs %}
+<section class="job">
+  <h2>Job #{{ job.id }} — {{ job.default_title }}</h2>
+  <p class="meta">
+    {{ job.video_path }} · submitted {{ job.created_at }}
+    {% if job.scheduled_for %}
+    · scheduled for {{ job.scheduled_for }} UTC ({{ job.scheduled_tz }})
+    -- <a href="/jobs/{{ job.id }}/reschedule">reschedule</a>
+    {% endif %}
+  </p>
+  <table>
+    <thead>
+      <tr><th>Platform</th><th>Status</th><th>Detail</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for pj in job.platform_jobs %}
+      <tr class="status-{{ pj.status }}">
+        <td>{{ pj.platform }}</td>
+        <td>{{ pj.status }}</td>
+        <td>{{ pj.error_message or pj.platform_video_id or "" }}</td>
+        <td>
+          {% if pj.status in ("uploading", "processing") %}
+          <form action="/jobs/platform/{{ pj.id }}/refresh" method="post" style="display:inline">
+            <button type="submit">Refresh status</button>
+          </form>
+          {% endif %}
+          {% if pj.status == "failed" %}
+          <form action="/jobs/platform/{{ pj.id }}/retry" method="post" style="display:inline">
+            <button type="submit">Retry</button>
+          </form>
+          {% elif pj.status == "missed" %}
+          <form action="/jobs/platform/{{ pj.id }}/retry" method="post" style="display:inline">
+            <button type="submit">Upload now</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Reschedule{% endblock %}
+{% block content %}
+<h2>Reschedule job #{{ upload_job.id }} — {{ upload_job.default_title }}</h2>
+
+<form action="/jobs/{{ upload_job.id }}/reschedule" method="post">
+  <label>Date &amp; time
+    <input type="datetime-local" name="scheduled_at" value="{{ prefill or '' }}" required>
+  </label>
+  <label>Timezone
+    <select name="scheduled_tz">
+      {% for tz in timezones %}
+      <option value="{{ tz }}" {% if tz == current_tz %}selected{% endif %}>{{ tz }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Reschedule</button>
+</form>
+{% endblock %}

@@ -1,0 +1,72 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 720px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: #1a1a1a;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+header a {
+  text-decoration: none;
+  color: inherit;
+}
+
+nav a {
+  margin-left: 1rem;
+}
+
+form label {
+  display: block;
+  margin-bottom: 1rem;
+}
+
+form input[type="text"],
+form textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+fieldset {
+  margin-bottom: 1rem;
+}
+
+.note {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.error {
+  color: #c0392b;
+  font-weight: bold;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.4rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.status-published { color: #1a7f37; }
+.status-failed { color: #c0392b; }
+.status-missed { color: #c0392b; }
+.status-uploading, .status-processing { color: #b8860b; }
+
+.missed-banner {
+  border: 2px solid #c0392b;
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}

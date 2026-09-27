@@ -1,0 +1,40 @@
+# Copy this file to config.yaml (gitignored) and fill in your own values.
+# App-level credentials (client ID/secret) registered by you on each
+# platform's developer console. User OAuth tokens are NOT stored here —
+# they live in the OS keychain via `keyring`.
+
+server:
+  host: 127.0.0.1
+  port: 8000
+
+storage:
+  db_path: data/video_uploader.sqlite3
+  upload_dir: data/uploads
+
+# default_format is the format variant used when a job doesn't set one
+# explicitly (e.g. "standard"/"shorts" for YouTube, "feed"/"reel"/"story"
+# for Instagram). Leave blank to let the publisher auto-detect from the
+# video instead (auto-detection lands in milestone 8).
+platforms:
+  # youtube.client_id/client_secret come from a Google Cloud Console OAuth
+  # client (Web application type). Register this exact redirect URI there:
+  #   http://127.0.0.1:8000/oauth/youtube/callback
+  # (adjust host/port to match `server:` above if you change it).
+  youtube:
+    client_id: ""
+    client_secret: ""
+    default_format: "standard"
+  facebook:
+    app_id: ""
+    app_secret: ""
+    page_id: ""
+    default_format: ""
+  instagram:
+    app_id: ""
+    app_secret: ""
+    business_account_id: ""
+    default_format: "feed"
+  tiktok:
+    client_key: ""
+    client_secret: ""
+    default_format: ""
