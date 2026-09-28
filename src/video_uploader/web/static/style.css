@@ -1,9 +1,38 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #666666;
+  --border: #dddddd;
+  --error: #c0392b;
+  --success: #1a7f37;
+  --warning: #b8860b;
+  --input-bg: #ffffff;
+  --input-border: #cccccc;
+  --code-bg: #f2f2f2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a1a;
+    --fg: #e8e8e8;
+    --muted: #a0a0a0;
+    --border: #3a3a3a;
+    --error: #ff6b5b;
+    --success: #4caf6e;
+    --warning: #e0b040;
+    --input-bg: #2a2a2a;
+    --input-border: #4a4a4a;
+    --code-bg: #262626;
+  }
+}
+
 body {
   font-family: system-ui, sans-serif;
   max-width: 720px;
   margin: 2rem auto;
   padding: 0 1rem;
-  color: #1a1a1a;
+  color: var(--fg);
+  background: var(--bg);
 }
 
 header {
@@ -20,6 +49,7 @@ header a {
 
 nav a {
   margin-left: 1rem;
+  color: var(--fg);
 }
 
 form label {
@@ -28,23 +58,36 @@ form label {
 }
 
 form input[type="text"],
-form textarea {
+form input[type="file"],
+form input[type="datetime-local"],
+form textarea,
+form select {
   width: 100%;
   box-sizing: border-box;
+  background: var(--input-bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
 }
 
 fieldset {
   margin-bottom: 1rem;
+  border-color: var(--border);
 }
 
 .note {
-  color: #666;
+  color: var(--muted);
   font-size: 0.9rem;
 }
 
 .error {
-  color: #c0392b;
+  color: var(--error);
   font-weight: bold;
+}
+
+code {
+  background: var(--code-bg);
+  padding: 0.15rem 0.3rem;
+  border-radius: 3px;
 }
 
 table {
@@ -56,16 +99,16 @@ table {
 th, td {
   text-align: left;
   padding: 0.4rem;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid var(--border);
 }
 
-.status-published { color: #1a7f37; }
-.status-failed { color: #c0392b; }
-.status-missed { color: #c0392b; }
-.status-uploading, .status-processing { color: #b8860b; }
+.status-published { color: var(--success); }
+.status-failed { color: var(--error); }
+.status-missed { color: var(--error); }
+.status-uploading, .status-processing { color: var(--warning); }
 
 .missed-banner {
-  border: 2px solid #c0392b;
+  border: 2px solid var(--error);
   border-radius: 4px;
   padding: 1rem;
   margin-bottom: 1.5rem;
