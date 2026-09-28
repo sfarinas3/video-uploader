@@ -210,3 +210,32 @@ class YouTubePublisher:
         response = self._youtube.channels().list(part="snippet", mine=True).execute()
         items = response.get("items", [])
         return items[0]["snippet"]["title"] if items else None
+
+    def find_top_tags(self, keyword: str, max_results: int = 15) -> list[tuple[str, int]]:
+        """Not part of the Publisher protocol (DESIGN.md milestone 10).
+        Finds the top-ranking videos for `keyword` and returns the tags
+        they use, aggregated and sorted by how many of those videos use
+        each one (descending). Confirmed live: videos.list returns
+        snippet.tags for any public video, not just ones this account
+        owns -- this is real competitive-tag data, not a guess.
+
+        search.list costs 100 quota units per call regardless of
+        max_results -- callers should surface that cost, not hide it."""
+        search_response = (
+            self._youtube.search()
+            .list(part="snippet", q=keyword, type="video", order="relevance", maxResults=max_results)
+            .execute()
+        )
+        video_ids = [item["id"]["videoId"] for item in search_response.get("items", [])]
+        if not video_ids:
+            return []
+
+        videos_response = (
+            self._youtube.videos().list(part="snippet", id=",".join(video_ids)).execute()
+        )
+        tag_counts: dict[str, int] = {}
+        for item in videos_response.get("items", []):
+            for tag in item["snippet"].get("tags", []):
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+        return sorted(tag_counts.items(), key=lambda kv: kv[1], reverse=True)

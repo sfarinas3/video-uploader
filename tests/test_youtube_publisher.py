@@ -28,6 +28,14 @@ class _FakePlaylistItemsResource:
         return _Execute(self._response)
 
 
+class _FakeSearchResource:
+    def __init__(self, response):
+        self._response = response
+
+    def list(self, part, q, type, order, maxResults):
+        return _Execute(self._response)
+
+
 class _FakeThumbnailsResource:
     def __init__(self, exception=None, calls=None):
         self._exception = exception
@@ -51,6 +59,7 @@ class FakeYouTubeClient:
         channels_response=None,
         playlist_items_response=None,
         thumbnail_exception=None,
+        search_response=None,
     ):
         self._insert_response = insert_response
         self._insert_exception = insert_exception
@@ -59,6 +68,7 @@ class FakeYouTubeClient:
         self._playlist_items_response = playlist_items_response
         self.thumbnail_calls: list[str] = []
         self._thumbnail_exception = thumbnail_exception
+        self._search_response = search_response
 
     def videos(self):
         return self
@@ -79,6 +89,9 @@ class FakeYouTubeClient:
 
     def thumbnails(self):
         return _FakeThumbnailsResource(exception=self._thumbnail_exception, calls=self.thumbnail_calls)
+
+    def search(self):
+        return _FakeSearchResource(self._search_response)
 
 
 @pytest.fixture
@@ -265,3 +278,32 @@ def test_upload_reraises_timeout_when_recent_upload_title_does_not_match(publish
     )
     with pytest.raises(TimeoutError):
         publisher.upload(_video(tmp_path), PlatformMetadata(title="Test video", privacy="private"))
+
+
+def test_find_top_tags_aggregates_and_sorts_by_frequency(publisher):
+    publisher._youtube = FakeYouTubeClient(
+        search_response={"items": [{"id": {"videoId": "v1"}}, {"id": {"videoId": "v2"}}]},
+        list_response={
+            "items": [
+                {"id": "v1", "snippet": {"tags": ["guitar", "fingerstyle"]}},
+                {"id": "v2", "snippet": {"tags": ["guitar", "acoustic"]}},
+            ]
+        },
+    )
+    result = publisher.find_top_tags("fingerstyle guitar")
+    assert result[0] == ("guitar", 2)
+    assert ("fingerstyle", 1) in result
+    assert ("acoustic", 1) in result
+
+
+def test_find_top_tags_skips_videos_with_no_tags(publisher):
+    publisher._youtube = FakeYouTubeClient(
+        search_response={"items": [{"id": {"videoId": "v1"}}]},
+        list_response={"items": [{"id": "v1", "snippet": {}}]},
+    )
+    assert publisher.find_top_tags("keyword") == []
+
+
+def test_find_top_tags_returns_empty_for_no_search_results(publisher):
+    publisher._youtube = FakeYouTubeClient(search_response={"items": []})
+    assert publisher.find_top_tags("nonsense keyword") == []

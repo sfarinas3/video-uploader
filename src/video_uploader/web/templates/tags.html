@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Tag inspector{% endblock %}
+{% block content %}
+<h2>YouTube tag inspector</h2>
+<p class="note">
+  Finds the top-ranking YouTube videos for a keyword and shows which tags
+  they use, ranked by how many of them use each one. YouTube-only --
+  Facebook, Instagram, and TikTok have no equivalent public API for this.
+  Each search costs 100 of your YouTube API quota units (default quota is
+  10,000/day, so roughly 100 searches/day).
+</p>
+
+<form action="/tools/tags" method="get">
+  <label>Keyword
+    <input type="text" name="keyword" value="{{ keyword }}" placeholder="e.g. fingerstyle guitar" required>
+  </label>
+  <button type="submit">Search</button>
+</form>
+
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+
+{% if keyword and not error %}
+  {% if tags %}
+  <h3>Copy-paste tags</h3>
+  <p class="note">Ready to paste into the upload form's "Tags (comma-separated)" field:</p>
+  <p><code>{{ tag_names_csv }}</code></p>
+
+  <h3>Ranked by frequency</h3>
+  <table>
+    <thead>
+      <tr><th>Tag</th><th>Used by</th></tr>
+    </thead>
+    <tbody>
+      {% for tag, count in tags %}
+      <tr>
+        <td>{{ tag }}</td>
+        <td>{{ count }} video{{ "s" if count != 1 else "" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No tagged videos found for "{{ keyword }}".</p>
+  {% endif %}
+{% endif %}
+{% endblock %}

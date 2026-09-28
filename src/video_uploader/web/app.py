@@ -275,6 +275,33 @@ def retry_failed_platform_jobs(upload_job_id: int):
     return RedirectResponse(url=f"/jobs/{upload_job_id}", status_code=303)
 
 
+@app.get("/tools/tags")
+def tag_inspector(request: Request, keyword: str = ""):
+    """DESIGN.md milestone 10: standalone lookup tool, not part of any
+    PlatformJob. YouTube-only -- Facebook/Instagram/TikTok have no
+    equivalent official API for this."""
+    tags: list[tuple[str, int]] = []
+    error: str | None = None
+    if keyword.strip():
+        try:
+            publisher = YouTubePublisher()
+            publisher.authenticate()
+            tags = publisher.find_top_tags(keyword.strip())
+        except Exception as exc:  # noqa: BLE001 - surface as a page message, not a 500
+            error = str(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "tags.html",
+        {
+            "keyword": keyword,
+            "tags": tags,
+            "tag_names_csv": ", ".join(tag for tag, _ in tags),
+            "error": error,
+        },
+    )
+
+
 @app.get("/jobs/{upload_job_id}/reschedule")
 def reschedule_form(request: Request, upload_job_id: int):
     with Session(engine) as session:
