@@ -55,6 +55,17 @@ platforms:
   # instagram_content_publish for this reason.
   instagram:
     default_format: "feed"
+  # tiktok.client_key/client_secret come from a TikTok Developer app
+  # (developers.tiktok.com) with the Content Posting API product added,
+  # Direct Post enabled, and the video.publish scope (not video.upload --
+  # that only drops a draft in the user's inbox rather than actually
+  # posting). Register this exact redirect URI there (reuses the same
+  # HTTPS catcher and fake local domain as Facebook, see
+  # oauth_https_catcher.py):
+  #   https://video-uploader.local:8443/oauth/tiktok/callback
+  # Unaudited apps can only post as private/self-view -- this tool
+  # enforces that regardless of what's requested (DESIGN.md §3/§8), so
+  # there's no App Review to pursue for v1.
   tiktok:
     client_key: ""
     client_secret: ""

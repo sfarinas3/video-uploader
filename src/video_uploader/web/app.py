@@ -30,6 +30,8 @@ from video_uploader.core.types import Platform, PlatformJobStatus, PlatformMetad
 from video_uploader.db import create_db_and_tables, get_engine
 from video_uploader.models import PlatformJob, UploadJob
 from video_uploader.publishers.facebook import GRAPH_API_VERSION as FACEBOOK_GRAPH_VERSION
+from video_uploader.publishers.tiktok import AUTH_URL as TIKTOK_AUTH_URL
+from video_uploader.publishers.tiktok import SCOPES as TIKTOK_SCOPES
 from video_uploader.publishers.youtube import SCOPES as YOUTUBE_SCOPES
 from video_uploader.publishers.youtube import YouTubePublisher
 
@@ -259,6 +261,11 @@ def settings(request: Request):
         # unlike YouTube, no live API round trip needed to show this.
         facebook_page_name = token_store.load_token("facebook").get("page_name")
 
+    # TikTok has no separate "connected account name" display -- DESIGN.md
+    # §3/§8 already means every TikTok upload posts as private/self-view
+    # regardless of account, so there's no channel/page-style identity
+    # worth surfacing here the way YouTube's/Facebook's rows do.
+
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -349,5 +356,30 @@ def facebook_oauth_start():
         f"https://www.facebook.com/{FACEBOOK_GRAPH_VERSION}/dialog/oauth"
         f"?client_id={fb_config['app_id']}&redirect_uri={oauth_https_catcher.CALLBACK_URL}"
         f"&state={state}&scope={FACEBOOK_SCOPES}"
+    )
+    return RedirectResponse(auth_url)
+
+
+def _tiktok_client_config() -> dict:
+    platform_config = config.platforms.get("tiktok", {})
+    return {
+        "client_key": platform_config.get("client_key", ""),
+        "client_secret": platform_config.get("client_secret", ""),
+    }
+
+
+@app.get("/oauth/tiktok/start")
+def tiktok_oauth_start():
+    # Same HTTPS-catcher setup as Facebook -- TikTok also requires HTTPS
+    # redirect URIs with no loopback exemption. Unlike Instagram, TikTok
+    # has a fully independent OAuth identity (not derived from another
+    # platform's connection), so this is its own dedicated start route.
+    tiktok_config = _tiktok_client_config()
+    state = secrets.token_urlsafe(24)
+    oauth_https_catcher.pending_states.add(state)
+    auth_url = (
+        f"{TIKTOK_AUTH_URL}?client_key={tiktok_config['client_key']}"
+        f"&response_type=code&scope={TIKTOK_SCOPES}"
+        f"&redirect_uri={oauth_https_catcher.TIKTOK_CALLBACK_URL}&state={state}"
     )
     return RedirectResponse(auth_url)

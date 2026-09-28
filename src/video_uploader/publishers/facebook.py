@@ -99,6 +99,7 @@ def complete_oauth(code: str, redirect_uri: str) -> dict:
         "page_id": page["id"],
         "page_name": page["name"],
     }
+    token_store.save_token("facebook", facebook_token)
 
     with httpx.Client(timeout=30.0) as client:
         ig_resp = client.get(

@@ -24,6 +24,8 @@
             {% endif %}
           {% elif platform == "instagram" %}
             connected via the Facebook Page above
+          {% elif platform == "tiktok" %}
+            (uploads always post as private/self-view -- see DESIGN.md §3/§8)
           {% endif %}
         {% else %}
           Not connected
@@ -41,6 +43,8 @@
           (also connects Instagram, if this Page has a linked Business account)
         {% elif platform == "instagram" %}
           use the Facebook row above
+        {% elif platform == "tiktok" %}
+          <a href="/oauth/tiktok/start">{{ "Reconnect" if connected[platform] else "Connect" }}</a>
         {% else %}
           not implemented yet
         {% endif %}

@@ -89,9 +89,11 @@ class FailingPublisher:
 @pytest.fixture
 def registered_publishers(monkeypatch):
     """Registers FakePublisher for 'youtube' and FailingPublisher for
-    'facebook'; 'tiktok' stays unregistered so tests can exercise the 'no
-    publisher registered' path ('instagram' is a real registered publisher
-    as of milestone 5, so it no longer serves that purpose)."""
+    'facebook'. All four real platforms (youtube/facebook/instagram/
+    tiktok) are registered publishers as of milestone 6, so tests that
+    need to exercise the 'no publisher registered' path use a made-up
+    platform name like 'vimeo' instead -- CoreEngine doesn't validate
+    platform names against the Platform enum, so any string works."""
     from video_uploader.publishers import PLATFORM_PUBLISHERS
 
     monkeypatch.setitem(PLATFORM_PUBLISHERS, "youtube", FakePublisher)

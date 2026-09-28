@@ -1,6 +1,7 @@
 from video_uploader.publishers.base import Publisher
 from video_uploader.publishers.facebook import FacebookPublisher
 from video_uploader.publishers.instagram import InstagramPublisher
+from video_uploader.publishers.tiktok import TikTokPublisher
 from video_uploader.publishers.youtube import YouTubePublisher
 
 # Registered by each platform's implementation as it's built. A missing
@@ -10,4 +11,5 @@ PLATFORM_PUBLISHERS: dict[str, type[Publisher]] = {
     "youtube": YouTubePublisher,
     "facebook": FacebookPublisher,
     "instagram": InstagramPublisher,
+    "tiktok": TikTokPublisher,
 }
