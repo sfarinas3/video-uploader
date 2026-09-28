@@ -490,9 +490,44 @@ def tiktok_oauth_start():
     return RedirectResponse(auth_url)
 
 
+def _wait_until_serving(host: str, port: int, timeout_seconds: float = 10.0) -> None:
+    """Blocks until something is accepting connections on host:port, so the
+    desktop window isn't opened against a server that hasn't bound yet."""
+    import socket
+    import time
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return
+        except OSError:
+            time.sleep(0.1)
+    raise RuntimeError(f"Server did not start listening on {host}:{port} in time")
+
+
 def main() -> None:
     """Entry point for both the `video-uploader` console script
-    (pyproject.toml's [project.scripts]) and run.py."""
-    import uvicorn
+    (pyproject.toml's [project.scripts]) and run.py. Runs the FastAPI app on
+    a background thread and shows it in a native desktop window (no browser
+    chrome) via pywebview."""
+    import threading
 
-    uvicorn.run(app, host=config.server.host, port=config.server.port)
+    import uvicorn
+    import webview
+
+    def run_server() -> None:
+        uvicorn.run(app, host=config.server.host, port=config.server.port, log_level="warning")
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    _wait_until_serving(config.server.host, config.server.port)
+
+    webview.create_window(
+        "Video Uploader",
+        f"http://{config.server.host}:{config.server.port}",
+        width=1100,
+        height=850,
+        min_size=(700, 500),
+    )
+    webview.start()

@@ -44,12 +44,29 @@ or, after `pip install -e .`, the equivalent console script:
 video-uploader
 ```
 
-Then open `http://127.0.0.1:8000`. On first use, visit `/settings` to
-connect each platform you want to publish to — this walks you through
-that platform's OAuth flow.
+This opens the app in its own desktop window (via `pywebview`), not a
+browser tab. On first use, visit Settings to connect each platform you
+want to publish to — this walks you through that platform's OAuth flow.
 
 Logs are written to both the console and `data/app.log` (rotated, kept
 locally, gitignored along with the SQLite job database).
+
+## Desktop app (.exe)
+
+To build a standalone Windows executable with a custom icon, for a
+proper double-click-to-launch/pin-to-taskbar desktop app:
+
+```
+pip install -e ".[build]"
+.\scripts\build_exe.ps1
+```
+
+This produces `dist\video-uploader.exe`. Frozen builds read
+`config.yaml`/`data/` from next to the exe rather than the source tree,
+so copy `config.example.yaml` alongside it as `config.yaml` and fill in
+credentials (the build script copies `config.example.yaml` there for
+you). From there you can create a shortcut to the exe and pin it to the
+desktop/taskbar like any other app.
 
 ## Running tests
 

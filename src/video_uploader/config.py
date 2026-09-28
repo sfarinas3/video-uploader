@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if getattr(sys, "frozen", False):
+    # Running as a PyInstaller-bundled exe: there's no source tree on disk
+    # (the app itself is unpacked into a temp dir at startup), so config.yaml
+    # and the data/ folder live next to the exe instead.
+    REPO_ROOT = Path(sys.executable).resolve().parent
+else:
+    REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
 EXAMPLE_CONFIG_PATH = REPO_ROOT / "config.example.yaml"
 
