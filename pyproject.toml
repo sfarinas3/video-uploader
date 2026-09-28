@@ -30,7 +30,7 @@ build = [
 ]
 
 [project.scripts]
-video-uploader = "video_uploader.web.app:main"
+video-uploader = "video_uploader.launcher:main"
 
 [build-system]
 requires = ["hatchling"]

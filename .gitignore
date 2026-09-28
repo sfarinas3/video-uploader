@@ -4,11 +4,13 @@ __pycache__/
 venv/
 .env
 config.yaml
+config_path.txt
 *.sqlite3
 .DS_Store
 data/
 *.egg-info/
 build/
 dist/
+dist_installer/
 *.spec
 

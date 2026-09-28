@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,13 +36,18 @@ class AppConfig:
     server: ServerConfig
     storage: StorageConfig
     platforms: dict[str, dict[str, str]]
+    config_path: Path
 
 
 def load_config(path: Path | None = None) -> AppConfig:
     """Load config.yaml, falling back to config.example.yaml if the user
     hasn't created their own copy yet (app-level credentials will just be
-    blank in that case)."""
+    blank in that case). If the VIDEO_UPLOADER_CONFIG_PATH env var is set
+    (launcher.py sets this when the user picks a config file to reuse), it
+    takes priority over the default config.yaml next to the app."""
+    override = os.environ.get("VIDEO_UPLOADER_CONFIG_PATH")
     config_path = path or (
+        Path(override) if override else
         DEFAULT_CONFIG_PATH if DEFAULT_CONFIG_PATH.exists() else EXAMPLE_CONFIG_PATH
     )
     raw = yaml.safe_load(config_path.read_text()) or {}
@@ -59,4 +65,5 @@ def load_config(path: Path | None = None) -> AppConfig:
             upload_dir=REPO_ROOT / storage_raw.get("upload_dir", "data/uploads"),
         ),
         platforms=raw.get("platforms", {}),
+        config_path=config_path,
     )

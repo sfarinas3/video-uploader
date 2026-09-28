@@ -380,8 +380,22 @@ def settings(request: Request):
             "youtube_channel_name": youtube_channel_name,
             "youtube_channel_error": youtube_channel_error,
             "facebook_page_name": facebook_page_name,
+            "config_path": str(config.config_path),
+            "config_file_cleared": request.query_params.get("config_file_cleared") is not None,
         },
     )
+
+
+@app.post("/settings/forget-config-file")
+def forget_config_file():
+    """Clears the remembered config.yaml choice (launcher.py's pointer
+    file) so the next launch re-prompts, or falls back to config.yaml next
+    to the app if one exists there. Takes effect on restart, not live --
+    this process already loaded its config at import time."""
+    from video_uploader.launcher import POINTER_PATH
+
+    POINTER_PATH.unlink(missing_ok=True)
+    return RedirectResponse("/settings?config_file_cleared=1", status_code=303)
 
 
 def _youtube_client_config() -> dict:

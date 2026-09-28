@@ -51,10 +51,9 @@ want to publish to — this walks you through that platform's OAuth flow.
 Logs are written to both the console and `data/app.log` (rotated, kept
 locally, gitignored along with the SQLite job database).
 
-## Desktop app (.exe)
+## Desktop app (.exe / installer)
 
-To build a standalone Windows executable with a custom icon, for a
-proper double-click-to-launch/pin-to-taskbar desktop app:
+To build a standalone Windows executable with a custom icon:
 
 ```
 pip install -e ".[build]"
@@ -67,6 +66,25 @@ so copy `config.example.yaml` alongside it as `config.yaml` and fill in
 credentials (the build script copies `config.example.yaml` there for
 you). From there you can create a shortcut to the exe and pin it to the
 desktop/taskbar like any other app.
+
+For a real installer (Start Menu + optional desktop shortcut, proper
+uninstaller), install [Inno Setup](https://jrsoftware.org/isinfo.php)
+and run:
+
+```
+.\scripts\build_installer.ps1
+```
+
+This produces `dist_installer\VideoUploaderSetup.exe` -- a single file
+you can hand to someone else. It installs per-user (no admin rights
+needed) to `%LOCALAPPDATA%\Programs\VideoUploader` and seeds a starter
+`config.yaml` there.
+
+On first launch, if no `config.yaml` exists yet next to the app, it'll
+offer a file picker so you can point at an existing `config.yaml` (e.g.
+one already set up on another install) instead of starting from a blank
+template -- that choice is remembered for next time. You can clear it
+from Settings ("Use a different file...") to be asked again on restart.
 
 ## Running tests
 
