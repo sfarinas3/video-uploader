@@ -18,7 +18,7 @@
       <tr>
         <td><a href="/jobs/{{ upload_job.id }}">#{{ upload_job.id }} — {{ upload_job.default_title }}</a></td>
         <td>{{ pj.platform }}</td>
-        <td>{{ upload_job.scheduled_for }} UTC</td>
+        <td>{{ upload_job.scheduled_for | format_datetime }}</td>
         <td>
           <form action="/jobs/platform/{{ pj.id }}/retry" method="post" style="display:inline">
             <button type="submit">Upload now</button>

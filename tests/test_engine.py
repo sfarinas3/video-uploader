@@ -3,6 +3,9 @@ from pathlib import Path
 
 from video_uploader.core.types import PlatformJobStatus, PlatformMetadata
 from video_uploader.models import PlatformJob
+from video_uploader.publishers import PLATFORM_PUBLISHERS
+
+from conftest import FlakyPublisher
 
 
 def _submit(core_engine, platforms, **kwargs):
@@ -215,3 +218,35 @@ def test_reschedule_upload_job_updates_schedule_and_resets_missed_only(
     assert job.scheduled_tz == "America/New_York"
     assert by_platform["youtube"].status == PlatformJobStatus.PENDING
     assert by_platform["facebook"].status == PlatformJobStatus.FAILED
+
+
+def test_transient_authenticate_failure_is_retried_and_succeeds(
+    core_engine, monkeypatch, session
+):
+    monkeypatch.setattr("video_uploader.retry.time.sleep", lambda _: None)
+    monkeypatch.setitem(PLATFORM_PUBLISHERS, "youtube", FlakyPublisher)
+    FlakyPublisher.auth_failures_remaining = 2
+    FlakyPublisher.status_failures_remaining = 0
+    FlakyPublisher.calls = []
+
+    job = _submit(core_engine, ["youtube"])
+    core_engine.run_job(job.id)
+
+    youtube_job = job.platform_jobs[0]
+    assert youtube_job.status == PlatformJobStatus.PUBLISHED
+    assert FlakyPublisher.calls.count("authenticate") == 3  # 2 failures + 1 success
+
+
+def test_persistent_get_status_failure_still_fails_the_job(core_engine, monkeypatch, session):
+    monkeypatch.setattr("video_uploader.retry.time.sleep", lambda _: None)
+    monkeypatch.setitem(PLATFORM_PUBLISHERS, "youtube", FlakyPublisher)
+    FlakyPublisher.auth_failures_remaining = 0
+    FlakyPublisher.status_failures_remaining = 99  # never recovers within max_attempts
+    FlakyPublisher.calls = []
+
+    job = _submit(core_engine, ["youtube"])
+    core_engine.run_job(job.id)
+
+    youtube_job = job.platform_jobs[0]
+    assert youtube_job.status == PlatformJobStatus.FAILED
+    assert FlakyPublisher.calls.count("get_status") == 3  # retry.with_backoff's default max_attempts

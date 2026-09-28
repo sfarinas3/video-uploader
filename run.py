@@ -1,7 +1,4 @@
-import uvicorn
-
-from video_uploader.config import load_config
+from video_uploader.web.app import main
 
 if __name__ == "__main__":
-    config = load_config()
-    uvicorn.run("video_uploader.web.app:app", host=config.server.host, port=config.server.port)
+    main()

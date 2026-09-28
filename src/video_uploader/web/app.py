@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import shutil
 import zoneinfo
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -45,6 +47,22 @@ engine = get_engine(config.storage.db_path)
 create_db_and_tables(engine)
 config.storage.upload_dir.mkdir(parents=True, exist_ok=True)
 
+# Structured logging (DESIGN.md §7): console + a rotating file alongside
+# the SQLite DB and OAuth cert, so failures are diagnosable without
+# re-running the app under a debugger. 5 x 1MB rotated files is plenty
+# for a single-user local tool.
+config.storage.db_path.parent.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(
+            config.storage.db_path.parent / "app.log", maxBytes=1_000_000, backupCount=5
+        ),
+    ],
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -61,6 +79,21 @@ app = FastAPI(title="Video Uploader", lifespan=lifespan)
 WEB_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
+
+
+def _format_datetime(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    # %-d/%-I (no leading zero) are glibc-only strftime extensions --
+    # not portable to Windows, which this app runs on. %d/%I with a
+    # leading zero stripped by hand keeps this working everywhere.
+    aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    day = str(int(aware.strftime("%d")))
+    hour = str(int(aware.strftime("%I")))
+    return aware.strftime(f"%b {day}, %Y {hour}:%M %p UTC")
+
+
+templates.env.filters["format_datetime"] = _format_datetime
 
 TIMEZONE_NAMES = sorted(zoneinfo.available_timezones())
 
@@ -220,6 +253,25 @@ def retry_platform_job(platform_job_id: int):
         core_engine.retry_platform_job(platform_job_id)
         platform_job = session.get(PlatformJob, platform_job_id)
         upload_job_id = platform_job.upload_job_id if platform_job else None
+    return RedirectResponse(url=f"/jobs/{upload_job_id}", status_code=303)
+
+
+@app.post("/jobs/{upload_job_id}/retry-failed")
+def retry_failed_platform_jobs(upload_job_id: int):
+    """Thin wrapper around retry_platform_job, called once per FAILED
+    platform job in this upload job -- no new engine logic, matches the
+    existing 'one platform at a time' retry semantics
+    (DESIGN.md §6.11)."""
+    with Session(engine) as session:
+        core_engine = CoreEngine(session)
+        upload_job = session.get(UploadJob, upload_job_id)
+        if upload_job is None:
+            raise HTTPException(status_code=404, detail="Upload job not found")
+        failed_ids = [
+            pj.id for pj in upload_job.platform_jobs if pj.status == PlatformJobStatus.FAILED
+        ]
+        for platform_job_id in failed_ids:
+            core_engine.retry_platform_job(platform_job_id)
     return RedirectResponse(url=f"/jobs/{upload_job_id}", status_code=303)
 
 
@@ -409,3 +461,11 @@ def tiktok_oauth_start():
         f"&redirect_uri={oauth_https_catcher.TIKTOK_CALLBACK_URL}&state={state}"
     )
     return RedirectResponse(auth_url)
+
+
+def main() -> None:
+    """Entry point for both the `video-uploader` console script
+    (pyproject.toml's [project.scripts]) and run.py."""
+    import uvicorn
+
+    uvicorn.run(app, host=config.server.host, port=config.server.port)

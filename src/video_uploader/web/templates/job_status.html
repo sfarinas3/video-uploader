@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Job status{% endblock %}
+{% block head %}
+{% for job in jobs %}
+  {% for pj in job.platform_jobs %}
+    {% if pj.status in ("uploading", "processing") %}
+<meta http-equiv="refresh" content="5">
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{% endblock %}
 {% block content %}
 {% if not jobs %}
   <p>No jobs yet.</p>
@@ -8,9 +17,9 @@
 <section class="job">
   <h2>Job #{{ job.id }} — {{ job.default_title }}</h2>
   <p class="meta">
-    {{ job.video_path }} · submitted {{ job.created_at }}
+    {{ job.video_path }} · submitted {{ job.created_at | format_datetime }}
     {% if job.scheduled_for %}
-    · scheduled for {{ job.scheduled_for }} UTC ({{ job.scheduled_tz }})
+    · scheduled for {{ job.scheduled_for | format_datetime }} ({{ job.scheduled_tz }})
     -- <a href="/jobs/{{ job.id }}/reschedule">reschedule</a>
     {% endif %}
   </p>
@@ -44,6 +53,12 @@
       {% endfor %}
     </tbody>
   </table>
+  {% set failed_count = job.platform_jobs | selectattr("status", "equalto", "failed") | list | length %}
+  {% if failed_count >= 2 %}
+  <form action="/jobs/{{ job.id }}/retry-failed" method="post">
+    <button type="submit">Retry all failed ({{ failed_count }})</button>
+  </form>
+  {% endif %}
 </section>
 {% endfor %}
 {% endblock %}

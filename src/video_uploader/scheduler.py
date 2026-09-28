@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session
 
 from video_uploader.core.engine import CoreEngine
 from video_uploader.db import get_engine
+
+logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 30
 
@@ -29,6 +33,8 @@ def _poll_due_jobs() -> None:
     with Session(get_engine()) as session:
         core_engine = CoreEngine(session)
         due_ids = core_engine.list_due_upload_job_ids()
+        if due_ids:
+            logger.info("poller found %d due upload job(s): %s", len(due_ids), due_ids)
         for upload_job_id in due_ids:
             core_engine.run_job(upload_job_id)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,9 +13,11 @@ from video_uploader.core.types import (
     PlatformMetadata,
     VideoFile,
 )
-from video_uploader import video_inspect
+from video_uploader import retry, video_inspect
 from video_uploader.models import PlatformJob, UploadJob
 from video_uploader.publishers import PLATFORM_PUBLISHERS
+
+logger = logging.getLogger(__name__)
 
 
 class CoreEngine:
@@ -136,12 +139,13 @@ class CoreEngine:
 
         try:
             publisher = publisher_cls()
-            publisher.authenticate()
-            status = publisher.get_status(
+            retry.with_backoff(publisher.authenticate)
+            status = retry.with_backoff(
+                publisher.get_status,
                 JobHandle(
                     platform_job_id=platform_job.id,
                     platform_native_id=platform_job.platform_video_id,
-                )
+                ),
             )
             platform_job.status = status.status
             platform_job.error_message = status.error_message
@@ -176,6 +180,8 @@ class CoreEngine:
             affected_ids.append(upload_job.id)
 
         self.session.commit()
+        if affected_ids:
+            logger.info("startup sweep marked %d upload job(s) missed", len(affected_ids))
         return affected_ids
 
     def list_due_upload_job_ids(self, as_of: datetime | None = None) -> list[int]:
@@ -214,6 +220,7 @@ class CoreEngine:
     def _run_platform_job(
         self, platform_job: PlatformJob, upload_job: UploadJob, video: VideoFile
     ) -> None:
+        logger.info("platform=%s job=%s starting", platform_job.platform, platform_job.id)
         metadata = PlatformMetadata(
             title=platform_job.title_override or upload_job.default_title,
             description=platform_job.description_override or upload_job.default_description,
@@ -234,7 +241,7 @@ class CoreEngine:
 
         try:
             publisher = publisher_cls()
-            publisher.authenticate()
+            retry.with_backoff(publisher.authenticate)
             errors = publisher.validate(video, metadata)
             if errors:
                 self._mark_failed(platform_job, "; ".join(errors))
@@ -243,19 +250,32 @@ class CoreEngine:
             platform_job.status = PlatformJobStatus.UPLOADING
             self.session.commit()
 
+            # upload() is deliberately not wrapped in retry.with_backoff --
+            # see retry.py's module docstring for why (risk of duplicate
+            # posts if a network error happens after the platform already
+            # received the request).
             handle = publisher.upload(video, metadata)
             platform_job.platform_video_id = handle.platform_native_id
 
-            status: JobStatus = publisher.get_status(handle)
+            status: JobStatus = retry.with_backoff(publisher.get_status, handle)
             platform_job.status = status.status
             platform_job.error_message = status.error_message
         except Exception as exc:  # noqa: BLE001 - one platform's failure must not raise
             self._mark_failed(platform_job, str(exc))
             return
 
+        logger.info(
+            "platform=%s job=%s finished with status=%s",
+            platform_job.platform,
+            platform_job.id,
+            platform_job.status,
+        )
         self.session.commit()
 
     def _mark_failed(self, platform_job: PlatformJob, message: str) -> None:
         platform_job.status = PlatformJobStatus.FAILED
         platform_job.error_message = message
         self.session.commit()
+        logger.warning(
+            "platform=%s job=%s failed: %s", platform_job.platform, platform_job.id, message
+        )

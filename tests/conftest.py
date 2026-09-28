@@ -70,6 +70,36 @@ class FakePublisher:
         return JobStatus(status=PlatformJobStatus.PUBLISHED)
 
 
+class FlakyPublisher:
+    """Test-only Publisher: authenticate()/get_status() fail with a
+    ConnectionError a configurable number of times (simulating transient
+    network errors) before succeeding, to exercise CoreEngine's
+    retry.with_backoff wrapping around those two calls."""
+
+    auth_failures_remaining = 0
+    status_failures_remaining = 0
+    calls: list[str] = []
+
+    def authenticate(self) -> None:
+        FlakyPublisher.calls.append("authenticate")
+        if FlakyPublisher.auth_failures_remaining > 0:
+            FlakyPublisher.auth_failures_remaining -= 1
+            raise ConnectionError("transient")
+
+    def validate(self, video, metadata) -> list[str]:
+        return []
+
+    def upload(self, video, metadata) -> JobHandle:
+        return JobHandle(platform_job_id=-1, platform_native_id="flaky-video-id")
+
+    def get_status(self, job: JobHandle) -> JobStatus:
+        FlakyPublisher.calls.append("get_status")
+        if FlakyPublisher.status_failures_remaining > 0:
+            FlakyPublisher.status_failures_remaining -= 1
+            raise ConnectionError("transient")
+        return JobStatus(status=PlatformJobStatus.PUBLISHED)
+
+
 class FailingPublisher:
     """Test-only Publisher: fails validate() every time."""
 
