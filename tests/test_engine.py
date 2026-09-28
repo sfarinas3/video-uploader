@@ -22,8 +22,8 @@ def test_fan_out_creates_one_platform_job_per_platform(core_engine, registered_p
 
 def test_one_platform_failing_does_not_affect_others(core_engine, registered_publishers, session):
     # youtube -> FakePublisher (succeeds), facebook -> FailingPublisher
-    # (validate fails), instagram -> unregistered.
-    job = _submit(core_engine, ["youtube", "facebook", "instagram"])
+    # (validate fails), tiktok -> unregistered.
+    job = _submit(core_engine, ["youtube", "facebook", "tiktok"])
     core_engine.run_job(job.id)
 
     by_platform = {pj.platform: pj for pj in job.platform_jobs}
@@ -33,28 +33,28 @@ def test_one_platform_failing_does_not_affect_others(core_engine, registered_pub
     assert by_platform["facebook"].status == PlatformJobStatus.FAILED
     assert "too long" in by_platform["facebook"].error_message
 
-    assert by_platform["instagram"].status == PlatformJobStatus.FAILED
-    assert "No publisher registered" in by_platform["instagram"].error_message
+    assert by_platform["tiktok"].status == PlatformJobStatus.FAILED
+    assert "No publisher registered" in by_platform["tiktok"].error_message
 
 
 def test_retry_platform_job_only_touches_target(core_engine, registered_publishers, session):
-    job = _submit(core_engine, ["youtube", "instagram"])
+    job = _submit(core_engine, ["youtube", "tiktok"])
     core_engine.run_job(job.id)
 
     by_platform = {pj.platform: pj for pj in job.platform_jobs}
     youtube_job = by_platform["youtube"]
-    instagram_job = by_platform["instagram"]
+    tiktok_job = by_platform["tiktok"]
     assert youtube_job.status == PlatformJobStatus.PUBLISHED
-    assert instagram_job.status == PlatformJobStatus.FAILED
+    assert tiktok_job.status == PlatformJobStatus.FAILED
 
-    core_engine.retry_platform_job(instagram_job.id)
+    core_engine.retry_platform_job(tiktok_job.id)
     session.refresh(youtube_job)
-    session.refresh(instagram_job)
+    session.refresh(tiktok_job)
 
     # still fails (no publisher registered), but retry_count incremented,
     # and youtube's already-published job is untouched.
-    assert instagram_job.retry_count == 1
-    assert instagram_job.status == PlatformJobStatus.FAILED
+    assert tiktok_job.retry_count == 1
+    assert tiktok_job.status == PlatformJobStatus.FAILED
     assert youtube_job.status == PlatformJobStatus.PUBLISHED
 
 

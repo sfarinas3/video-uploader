@@ -31,8 +31,12 @@ class FacebookAuthError(RuntimeError):
 
 
 def complete_oauth(code: str, redirect_uri: str) -> dict:
-    """Exchange an OAuth authorization `code` for a Page access token and
-    return the dict to pass to token_store.save_token("facebook", ...).
+    """Exchange an OAuth authorization `code` for a Page access token,
+    save it under token_store's "facebook" key, and -- if the resolved
+    Page has an Instagram Business account linked -- also save an
+    "instagram" token entry reusing the same Page access token (Instagram
+    Business publishing has no identity independent of its linked Page;
+    see instagram.py). Returns the dict saved under "facebook".
 
     Plain function (not a method) so it can be called from both the main
     app and the separate HTTPS OAuth catcher
@@ -90,11 +94,34 @@ def complete_oauth(code: str, redirect_uri: str) -> dict:
             f"to one of: {available}"
         )
 
-    return {
+    facebook_token = {
         "page_access_token": page["access_token"],
         "page_id": page["id"],
         "page_name": page["name"],
     }
+
+    with httpx.Client(timeout=30.0) as client:
+        ig_resp = client.get(
+            f"{GRAPH_API_BASE}/{page['id']}",
+            params={
+                "fields": "instagram_business_account",
+                "access_token": page["access_token"],
+            },
+        )
+        ig_resp.raise_for_status()
+        ig_account = ig_resp.json().get("instagram_business_account")
+
+    if ig_account is not None:
+        token_store.save_token(
+            "instagram",
+            {
+                "page_access_token": page["access_token"],
+                "ig_user_id": ig_account["id"],
+                "page_id": page["id"],
+            },
+        )
+
+    return facebook_token
 
 
 class FacebookPublisher:

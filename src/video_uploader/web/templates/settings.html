@@ -22,9 +22,15 @@
             {% if facebook_page_name %}
               — page: <strong>{{ facebook_page_name }}</strong>
             {% endif %}
+          {% elif platform == "instagram" %}
+            connected via the Facebook Page above
           {% endif %}
         {% else %}
           Not connected
+          {% if platform == "instagram" %}
+            (connect Facebook below -- Instagram publishing reuses that connection and
+            requires the Page to have a linked Instagram Business account)
+          {% endif %}
         {% endif %}
       </td>
       <td>
@@ -32,6 +38,9 @@
           <a href="/oauth/youtube/start">{{ "Reconnect" if connected[platform] else "Connect" }}</a>
         {% elif platform == "facebook" %}
           <a href="/oauth/facebook/start">{{ "Reconnect" if connected[platform] else "Connect" }}</a>
+          (also connects Instagram, if this Page has a linked Business account)
+        {% elif platform == "instagram" %}
+          use the Facebook row above
         {% else %}
           not implemented yet
         {% endif %}

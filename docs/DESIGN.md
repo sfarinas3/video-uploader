@@ -297,3 +297,12 @@ testing policy:
 7. Optional per-platform thumbnail upload support.
 8. Pre-flight validation via ffprobe for all platforms.
 9. Polish: retry UX, job history view, packaging.
+10. YouTube tag-inspector tool: given a keyword, find the top-ranking videos
+    for it (`search.list`) and surface the tags used by them (`videos.list`),
+    ranked by frequency, to help pick effective tags for a new upload.
+    YouTube-only -- Facebook/Instagram/TikTok expose no equivalent official
+    API for tag/hashtag popularity (see the "most popular tags" discussion
+    in project notes); first-party API only, no scraping or third-party
+    tag-research services, consistent with §1's no-third-party-server
+    principle. Standalone from the publishing flow -- a lookup tool, not
+    part of any PlatformJob.

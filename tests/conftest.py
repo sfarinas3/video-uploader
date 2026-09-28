@@ -89,8 +89,9 @@ class FailingPublisher:
 @pytest.fixture
 def registered_publishers(monkeypatch):
     """Registers FakePublisher for 'youtube' and FailingPublisher for
-    'facebook'; 'instagram'/'tiktok' stay unregistered so tests can exercise
-    the 'no publisher registered' path."""
+    'facebook'; 'tiktok' stays unregistered so tests can exercise the 'no
+    publisher registered' path ('instagram' is a real registered publisher
+    as of milestone 5, so it no longer serves that purpose)."""
     from video_uploader.publishers import PLATFORM_PUBLISHERS
 
     monkeypatch.setitem(PLATFORM_PUBLISHERS, "youtube", FakePublisher)

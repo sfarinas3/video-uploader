@@ -25,22 +25,35 @@ platforms:
     client_secret: ""
     default_format: "standard"
   # facebook.app_id/app_secret come from a Meta app (developers.facebook.com)
-  # with the pages_show_list/pages_manage_posts/pages_read_engagement
-  # permissions added. Register this exact redirect URI there (Facebook
-  # Login product settings):
-  #   http://127.0.0.1:8000/oauth/facebook/callback
+  # with two Use Cases added: "Manage everything on your Page" (adds
+  # pages_show_list/pages_manage_posts/pages_read_engagement/
+  # business_management) and "Manage messaging and content on Instagram"
+  # (adds instagram_basic/instagram_content_publish -- add its "Manage
+  # content on Instagram" permissions, not the messaging ones). Register
+  # this exact redirect URI there (Facebook Login product settings):
+  #   https://video-uploader.local:8443/oauth/facebook/callback
+  # (Meta requires HTTPS for the redirect URI; see oauth_https_catcher.py
+  # for why this uses a fake local domain instead of 127.0.0.1/localhost --
+  # map it to 127.0.0.1 in your OS hosts file and register it as an App
+  # Domain too).
   # page_id must be the numeric ID of the specific Page you want this tool
   # to publish to (you must be an admin of that Page) -- the connect flow
   # looks up that page's access token from the pages your account manages.
+  # For Instagram publishing (see the instagram block below), that Page
+  # must also have an Instagram Business account linked to it (Instagram
+  # app -> Settings -> Linked accounts, or the Page's own Settings ->
+  # Linked accounts).
   facebook:
     app_id: ""
     app_secret: ""
     page_id: ""
     default_format: ""
+  # Instagram has no separate app credentials or connect flow -- it reuses
+  # the Facebook app/connection above and auto-discovers the Instagram
+  # Business account linked to that Page at connect time. The Facebook
+  # OAuth scope already requested above includes instagram_basic and
+  # instagram_content_publish for this reason.
   instagram:
-    app_id: ""
-    app_secret: ""
-    business_account_id: ""
     default_format: "feed"
   tiktok:
     client_key: ""

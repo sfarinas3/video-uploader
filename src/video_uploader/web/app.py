@@ -33,7 +33,10 @@ from video_uploader.publishers.facebook import GRAPH_API_VERSION as FACEBOOK_GRA
 from video_uploader.publishers.youtube import SCOPES as YOUTUBE_SCOPES
 from video_uploader.publishers.youtube import YouTubePublisher
 
-FACEBOOK_SCOPES = "pages_show_list,pages_manage_posts,pages_read_engagement"
+FACEBOOK_SCOPES = (
+    "pages_show_list,pages_manage_posts,pages_read_engagement,business_management,"
+    "instagram_basic,instagram_content_publish"
+)
 
 config = load_config()
 engine = get_engine(config.storage.db_path)
