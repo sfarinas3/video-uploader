@@ -381,21 +381,33 @@ def settings(request: Request):
             "youtube_channel_error": youtube_channel_error,
             "facebook_page_name": facebook_page_name,
             "config_path": str(config.config_path),
-            "config_file_cleared": request.query_params.get("config_file_cleared") is not None,
+            "config_file_changed": request.query_params.get("config_file_changed") is not None,
         },
     )
 
 
-@app.post("/settings/forget-config-file")
-def forget_config_file():
-    """Clears the remembered config.yaml choice (launcher.py's pointer
-    file) so the next launch re-prompts, or falls back to config.yaml next
-    to the app if one exists there. Takes effect on restart, not live --
-    this process already loaded its config at import time."""
-    from video_uploader.launcher import POINTER_PATH
+def _reload_config_from(path: Path) -> None:
+    """Swaps in a newly-chosen config.yaml's platform credentials live, no
+    restart needed. Storage location (SQLite DB/uploads) and server
+    host/port stay anchored to this install and this running server, so
+    they're deliberately left untouched here."""
+    new_config = load_config(path)
+    config.platforms = new_config.platforms
+    config.config_path = new_config.config_path
 
-    POINTER_PATH.unlink(missing_ok=True)
-    return RedirectResponse("/settings?config_file_cleared=1", status_code=303)
+
+@app.post("/settings/choose-config-file")
+def choose_config_file():
+    """Opens the same native file picker launcher.py uses on startup, lets
+    the user reuse an existing config.yaml or create a new one anywhere,
+    and applies it immediately -- no app restart required."""
+    from video_uploader.launcher import choose_new_config_file
+
+    chosen = choose_new_config_file()
+    if chosen is not None:
+        _reload_config_from(chosen)
+        return RedirectResponse("/settings?config_file_changed=1", status_code=303)
+    return RedirectResponse("/settings", status_code=303)
 
 
 def _youtube_client_config() -> dict:

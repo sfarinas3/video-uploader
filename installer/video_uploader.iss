@@ -37,10 +37,10 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Files]
 Source: "..\dist\video-uploader.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Template only -- deliberately NOT copied/renamed to config.yaml here.
+; There's no default config.yaml location; the app always prompts you to
+; pick or create one on first launch (and remembers your choice).
 Source: "..\config.example.yaml"; DestDir: "{app}"; Flags: ignoreversion
-; Give first-time installs a ready-to-edit config.yaml; never overwrite one
-; an existing install (or the user) already created.
-Source: "..\config.example.yaml"; DestDir: "{app}"; DestName: "config.yaml"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

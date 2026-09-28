@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Settings{% endblock %}
 {% block content %}
-{% if config_file_cleared %}
-<p class="note">Cleared. Restart Video Uploader to pick a different config.yaml.</p>
+{% if config_file_changed %}
+<p class="note">Now using the newly-selected config file below -- no restart needed.</p>
 {% endif %}
 <p class="note">
   Using config file: <code>{{ config_path }}</code>.
-  <form action="/settings/forget-config-file" method="post" style="display:inline">
-    <button type="submit">Use a different file&hellip;</button>
+  <form action="/settings/choose-config-file" method="post" style="display:inline">
+    <button type="submit">Choose config file&hellip;</button>
   </form>
-  (clears the remembered choice; takes effect next launch)
+  (reuse an existing one, or create a new one anywhere -- applies immediately)
 </p>
 <table>
   <thead>
