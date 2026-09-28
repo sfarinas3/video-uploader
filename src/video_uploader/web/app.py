@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import zoneinfo
 from contextlib import asynccontextmanager
@@ -22,14 +23,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
-from video_uploader import scheduler, token_store
+from video_uploader import oauth_https_catcher, scheduler, token_store
 from video_uploader.config import load_config
 from video_uploader.core.engine import CoreEngine
 from video_uploader.core.types import Platform, PlatformJobStatus, PlatformMetadata
 from video_uploader.db import create_db_and_tables, get_engine
 from video_uploader.models import PlatformJob, UploadJob
+from video_uploader.publishers.facebook import GRAPH_API_VERSION as FACEBOOK_GRAPH_VERSION
 from video_uploader.publishers.youtube import SCOPES as YOUTUBE_SCOPES
 from video_uploader.publishers.youtube import YouTubePublisher
+
+FACEBOOK_SCOPES = "pages_show_list,pages_manage_posts,pages_read_engagement"
 
 config = load_config()
 engine = get_engine(config.storage.db_path)
@@ -41,7 +45,9 @@ config.storage.upload_dir.mkdir(parents=True, exist_ok=True)
 async def lifespan(app: FastAPI):
     scheduler.run_startup_sweep()
     scheduler.start()
+    oauth_https_catcher.start()
     yield
+    oauth_https_catcher.shutdown()
     scheduler.shutdown()
 
 
@@ -244,6 +250,12 @@ def settings(request: Request):
         except Exception as exc:  # noqa: BLE001 - surface as a page message, not a 500
             youtube_channel_error = str(exc)
 
+    facebook_page_name = None
+    if connected["facebook"]:
+        # Captured once at connect time (see oauth_https_catcher.py) --
+        # unlike YouTube, no live API round trip needed to show this.
+        facebook_page_name = token_store.load_token("facebook").get("page_name")
+
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -252,6 +264,7 @@ def settings(request: Request):
             "connected": connected,
             "youtube_channel_name": youtube_channel_name,
             "youtube_channel_error": youtube_channel_error,
+            "facebook_page_name": facebook_page_name,
         },
     )
 
@@ -307,3 +320,31 @@ def youtube_oauth_callback(request: Request):
         },
     )
     return RedirectResponse(url="/settings")
+
+
+def _facebook_client_config() -> dict:
+    platform_config = config.platforms.get("facebook", {})
+    return {
+        "app_id": platform_config.get("app_id", ""),
+        "app_secret": platform_config.get("app_secret", ""),
+        "page_id": platform_config.get("page_id", ""),
+    }
+
+
+@app.get("/oauth/facebook/start")
+def facebook_oauth_start():
+    # The callback itself is handled by the separate HTTPS catcher
+    # (video_uploader.oauth_https_catcher) -- Meta requires HTTPS for the
+    # redirect URI with no way to disable that for this app, unlike
+    # Google's loopback exemption that lets YouTube's flow stay on plain
+    # HTTP. This route only builds the outbound dialog URL; that request
+    # itself has no HTTPS requirement.
+    fb_config = _facebook_client_config()
+    state = secrets.token_urlsafe(24)
+    oauth_https_catcher.pending_states.add(state)
+    auth_url = (
+        f"https://www.facebook.com/{FACEBOOK_GRAPH_VERSION}/dialog/oauth"
+        f"?client_id={fb_config['app_id']}&redirect_uri={oauth_https_catcher.CALLBACK_URL}"
+        f"&state={state}&scope={FACEBOOK_SCOPES}"
+    )
+    return RedirectResponse(auth_url)

@@ -18,6 +18,10 @@
             {% elif youtube_channel_error %}
               (couldn't verify channel: {{ youtube_channel_error }})
             {% endif %}
+          {% elif platform == "facebook" %}
+            {% if facebook_page_name %}
+              — page: <strong>{{ facebook_page_name }}</strong>
+            {% endif %}
           {% endif %}
         {% else %}
           Not connected
@@ -26,6 +30,8 @@
       <td>
         {% if platform == "youtube" %}
           <a href="/oauth/youtube/start">{{ "Reconnect" if connected[platform] else "Connect" }}</a>
+        {% elif platform == "facebook" %}
+          <a href="/oauth/facebook/start">{{ "Reconnect" if connected[platform] else "Connect" }}</a>
         {% else %}
           not implemented yet
         {% endif %}

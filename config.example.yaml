@@ -24,6 +24,14 @@ platforms:
     client_id: ""
     client_secret: ""
     default_format: "standard"
+  # facebook.app_id/app_secret come from a Meta app (developers.facebook.com)
+  # with the pages_show_list/pages_manage_posts/pages_read_engagement
+  # permissions added. Register this exact redirect URI there (Facebook
+  # Login product settings):
+  #   http://127.0.0.1:8000/oauth/facebook/callback
+  # page_id must be the numeric ID of the specific Page you want this tool
+  # to publish to (you must be an admin of that Page) -- the connect flow
+  # looks up that page's access token from the pages your account manages.
   facebook:
     app_id: ""
     app_secret: ""

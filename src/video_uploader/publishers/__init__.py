@@ -1,4 +1,5 @@
 from video_uploader.publishers.base import Publisher
+from video_uploader.publishers.facebook import FacebookPublisher
 from video_uploader.publishers.youtube import YouTubePublisher
 
 # Registered by each platform's implementation as it's built. A missing
@@ -6,4 +7,5 @@ from video_uploader.publishers.youtube import YouTubePublisher
 # fails only that platform's job, not the whole upload.
 PLATFORM_PUBLISHERS: dict[str, type[Publisher]] = {
     "youtube": YouTubePublisher,
+    "facebook": FacebookPublisher,
 }
