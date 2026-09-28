@@ -82,6 +82,13 @@ def test_validate_rejects_empty_title(publisher, tmp_path):
     assert any("Title is required" in e for e in errors)
 
 
+def test_validate_rejects_too_short_duration(publisher, tmp_path):
+    video = _video(tmp_path)
+    video.duration_seconds = 1  # under TikTok's 3s minimum
+    errors = publisher.validate(video, PlatformMetadata(title="Test"))
+    assert any("below" in e and "minimum" in e for e in errors)
+
+
 def test_validate_rejects_title_too_long(publisher, tmp_path):
     errors = publisher.validate(_video(tmp_path), PlatformMetadata(title="x" * 2201))
     assert any("exceeds TikTok's" in e for e in errors)

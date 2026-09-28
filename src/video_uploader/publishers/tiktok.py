@@ -4,7 +4,7 @@ import mimetypes
 
 import httpx
 
-from video_uploader import token_store
+from video_uploader import preflight, token_store
 from video_uploader.config import load_config
 from video_uploader.core.types import (
     JobHandle,
@@ -149,6 +149,8 @@ class TikTokPublisher:
                 "selection from the uploaded video itself, which this tool doesn't "
                 "yet expose -- leave the thumbnail blank for TikTok"
             )
+
+        errors.extend(preflight.check_preflight(video, PLATFORM))
 
         return errors
 

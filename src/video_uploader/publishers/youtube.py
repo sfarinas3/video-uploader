@@ -7,7 +7,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-from video_uploader import token_store
+from video_uploader import preflight, token_store
 from video_uploader.config import load_config
 from video_uploader.core.types import (
     JobHandle,
@@ -97,6 +97,8 @@ class YouTubePublisher:
 
         if metadata.privacy not in ("private", "unlisted", "public"):
             errors.append(f"Invalid privacy value: {metadata.privacy!r}")
+
+        errors.extend(preflight.check_preflight(video, PLATFORM))
 
         return errors
 

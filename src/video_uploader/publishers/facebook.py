@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from video_uploader import token_store
+from video_uploader import preflight, token_store
 from video_uploader.config import load_config
 from video_uploader.core.types import (
     JobHandle,
@@ -158,6 +158,8 @@ class FacebookPublisher:
 
         if metadata.privacy not in ("private", "unlisted", "public"):
             errors.append(f"Invalid privacy value: {metadata.privacy!r}")
+
+        errors.extend(preflight.check_preflight(video, PLATFORM))
 
         return errors
 

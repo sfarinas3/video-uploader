@@ -4,7 +4,7 @@ import time
 
 import httpx
 
-from video_uploader import token_store
+from video_uploader import preflight, token_store
 from video_uploader.core.types import (
     JobHandle,
     JobStatus,
@@ -96,6 +96,8 @@ class InstagramPublisher:
         # even Facebook Pages' "secret" pseudo-privacy (DESIGN.md §10.2).
         # metadata.privacy is intentionally accepted without validation
         # here; it's simply not sent to the API.
+
+        errors.extend(preflight.check_preflight(video, PLATFORM))
 
         return errors
 

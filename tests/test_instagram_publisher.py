@@ -96,6 +96,13 @@ def test_validate_rejects_missing_title_and_description(publisher, tmp_path):
     assert any("caption" in e for e in errors)
 
 
+def test_validate_rejects_too_short_duration(publisher, tmp_path):
+    video = _video(tmp_path)
+    video.duration_seconds = 1  # under Instagram's 3s Reels minimum
+    errors = publisher.validate(video, PlatformMetadata(title="Test"))
+    assert any("below" in e and "minimum" in e for e in errors)
+
+
 def test_validate_accepts_description_only(publisher, tmp_path):
     errors = publisher.validate(_video(tmp_path), PlatformMetadata(title="", description="A caption"))
     assert errors == []

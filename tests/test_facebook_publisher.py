@@ -80,6 +80,13 @@ def test_validate_rejects_missing_video_file(publisher, tmp_path):
     assert any("not found" in e for e in errors)
 
 
+def test_validate_rejects_too_short_duration(publisher, tmp_path):
+    video = _video(tmp_path)
+    video.duration_seconds = 0.5  # under Facebook's 1s minimum
+    errors = publisher.validate(video, PlatformMetadata(title="Test"))
+    assert any("below" in e and "minimum" in e for e in errors)
+
+
 def test_validate_rejects_empty_title(publisher, tmp_path):
     errors = publisher.validate(_video(tmp_path), PlatformMetadata(title="   "))
     assert any("Title is required" in e for e in errors)

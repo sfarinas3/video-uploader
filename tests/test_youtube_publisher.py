@@ -105,6 +105,13 @@ def test_validate_rejects_empty_title(publisher, tmp_path):
     assert any("Title is required" in e for e in errors)
 
 
+def test_validate_rejects_oversized_file(publisher, tmp_path):
+    video = _video(tmp_path)
+    video.size_bytes = 300 * 1024**3  # over YouTube's 256GB sanity ceiling
+    errors = publisher.validate(video, PlatformMetadata(title="Test"))
+    assert any("byte maximum" in e for e in errors)
+
+
 def test_validate_rejects_title_too_long(publisher, tmp_path):
     errors = publisher.validate(_video(tmp_path), PlatformMetadata(title="x" * 101))
     assert any("100-character limit" in e for e in errors)

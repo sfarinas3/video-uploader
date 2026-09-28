@@ -12,6 +12,7 @@ from video_uploader.core.types import (
     PlatformMetadata,
     VideoFile,
 )
+from video_uploader import video_inspect
 from video_uploader.models import PlatformJob, UploadJob
 from video_uploader.publishers import PLATFORM_PUBLISHERS
 
@@ -88,12 +89,7 @@ class CoreEngine:
         if upload_job is None:
             raise ValueError(f"No UploadJob with id {upload_job_id}")
 
-        video = VideoFile(
-            path=Path(upload_job.video_path),
-            size_bytes=Path(upload_job.video_path).stat().st_size
-            if Path(upload_job.video_path).exists()
-            else 0,
-        )
+        video = self._build_video_file(Path(upload_job.video_path))
 
         for platform_job in upload_job.platform_jobs:
             if platform_job.status != PlatformJobStatus.PENDING:
@@ -107,14 +103,17 @@ class CoreEngine:
         if platform_job is None:
             raise ValueError(f"No PlatformJob with id {platform_job_id}")
         upload_job = platform_job.upload_job
-        video = VideoFile(
-            path=Path(upload_job.video_path),
-            size_bytes=Path(upload_job.video_path).stat().st_size
-            if Path(upload_job.video_path).exists()
-            else 0,
-        )
+        video = self._build_video_file(Path(upload_job.video_path))
         platform_job.retry_count += 1
         self._run_platform_job(platform_job, upload_job, video)
+
+    def _build_video_file(self, video_path: Path) -> VideoFile:
+        if not video_path.exists():
+            return VideoFile(path=video_path, size_bytes=0)
+        inspected = video_inspect.inspect_video(video_path)
+        return VideoFile(
+            path=video_path, size_bytes=video_path.stat().st_size, **inspected
+        )
 
     def refresh_platform_job_status(self, platform_job_id: int) -> None:
         """Re-check a platform job's current status without re-uploading --
