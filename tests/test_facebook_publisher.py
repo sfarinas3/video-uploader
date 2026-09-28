@@ -27,14 +27,22 @@ class FakeHttpClient:
         post_exception=None,
         get_response=None,
         recovery_response=None,
+        thumbnail_exception=None,
     ):
         self._post_response = post_response
         self._post_exception = post_exception
         self._get_response = get_response
         self._recovery_response = recovery_response
         self._get_call_count = 0
+        self._thumbnail_exception = thumbnail_exception
+        self.thumbnail_calls: list[str] = []
 
     def post(self, url, data=None, files=None):
+        if url.endswith("/thumbnails"):
+            self.thumbnail_calls.append(url)
+            if self._thumbnail_exception is not None:
+                raise self._thumbnail_exception
+            return _FakeResponse({"success": True})
         if self._post_exception is not None:
             raise self._post_exception
         return self._post_response
@@ -106,6 +114,32 @@ def test_privacy_maps_to_expected_params(publisher, privacy, expected):
 def test_upload_returns_job_handle_with_video_id(publisher, tmp_path):
     publisher._http = FakeHttpClient(post_response=_FakeResponse({"id": "abc123"}))
     handle = publisher.upload(_video(tmp_path), PlatformMetadata(title="Test", privacy="private"))
+    assert handle.platform_native_id == "abc123"
+
+
+def test_upload_sets_thumbnail_when_provided(publisher, tmp_path):
+    thumb = tmp_path / "thumb.jpg"
+    thumb.write_bytes(b"x")
+    fake = FakeHttpClient(post_response=_FakeResponse({"id": "abc123"}))
+    publisher._http = fake
+    publisher.upload(
+        _video(tmp_path),
+        PlatformMetadata(title="Test", privacy="private", thumbnail_path=thumb),
+    )
+    assert fake.thumbnail_calls == ["https://graph.facebook.com/v25.0/abc123/thumbnails"]
+
+
+def test_upload_succeeds_even_if_thumbnail_set_fails(publisher, tmp_path):
+    thumb = tmp_path / "thumb.jpg"
+    thumb.write_bytes(b"x")
+    fake = FakeHttpClient(
+        post_response=_FakeResponse({"id": "abc123"}), thumbnail_exception=RuntimeError("boom")
+    )
+    publisher._http = fake
+    handle = publisher.upload(
+        _video(tmp_path),
+        PlatformMetadata(title="Test", privacy="private", thumbnail_path=thumb),
+    )
     assert handle.platform_native_id == "abc123"
 
 

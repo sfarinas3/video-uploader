@@ -76,8 +76,18 @@ class InstagramPublisher:
         if not metadata.title.strip() and not metadata.description.strip():
             errors.append("Title or description is required (used as the caption)")
 
-        if metadata.thumbnail_path and not metadata.thumbnail_path.exists():
-            errors.append(f"Thumbnail file not found: {metadata.thumbnail_path}")
+        if metadata.thumbnail_path:
+            # Instagram's only cover-image mechanism is `cover_url`, which
+            # requires a publicly-hosted image URL -- there's no direct
+            # binary-upload equivalent the way there is for the video
+            # itself (M5's resumable upload). Incompatible with this
+            # tool's no-public-server design (DESIGN.md §7), so this is
+            # rejected outright rather than silently ignored.
+            errors.append(
+                "Instagram doesn't support custom thumbnail images via the API "
+                "(only cover_url, which requires public image hosting this tool "
+                "doesn't provide) -- leave the thumbnail blank for Instagram"
+            )
 
         if metadata.format_variant and metadata.format_variant not in FORMAT_TO_MEDIA_TYPE:
             errors.append(f"Invalid format_variant: {metadata.format_variant!r}")

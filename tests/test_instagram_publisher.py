@@ -108,6 +108,15 @@ def test_validate_does_not_reject_any_privacy_value(publisher, tmp_path):
     assert errors == []
 
 
+def test_validate_rejects_thumbnail_path(publisher, tmp_path):
+    thumb = tmp_path / "thumb.jpg"
+    thumb.write_bytes(b"x")
+    errors = publisher.validate(
+        _video(tmp_path), PlatformMetadata(title="Test", thumbnail_path=thumb)
+    )
+    assert any("doesn't support custom thumbnail images" in e for e in errors)
+
+
 def test_validate_rejects_invalid_format_variant(publisher, tmp_path):
     errors = publisher.validate(
         _video(tmp_path), PlatformMetadata(title="Test", format_variant="carousel")

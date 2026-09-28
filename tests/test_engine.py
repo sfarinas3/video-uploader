@@ -72,6 +72,32 @@ def test_format_variant_precedence(core_engine, session):
     assert by_platform["tiktok"].format_variant is None  # no override, no default
 
 
+def test_thumbnail_only_override_leaves_other_fields_at_job_defaults(core_engine, session):
+    default_metadata = PlatformMetadata(
+        title="Test", description="A description", tags=["a", "b"], privacy="unlisted"
+    )
+    job = core_engine.submit_job(
+        video_path=Path("does-not-exist.mp4"),
+        default_metadata=default_metadata,
+        platforms=["youtube"],
+        platform_overrides={
+            "youtube": PlatformMetadata(
+                title="Test",
+                description="A description",
+                tags=["a", "b"],
+                privacy="unlisted",
+                thumbnail_path=Path("thumb.jpg"),
+            )
+        },
+    )
+    youtube_job = job.platform_jobs[0]
+    assert youtube_job.thumbnail_path == "thumb.jpg"
+    assert youtube_job.title_override == job.default_title
+    assert youtube_job.description_override == job.default_description
+    assert youtube_job.tags_override == job.default_tags
+    assert youtube_job.privacy_override == job.default_privacy
+
+
 def test_privacy_defaults_to_private_and_can_be_overridden(core_engine, session):
     job = core_engine.submit_job(
         video_path=Path("does-not-exist.mp4"),

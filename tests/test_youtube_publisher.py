@@ -28,6 +28,18 @@ class _FakePlaylistItemsResource:
         return _Execute(self._response)
 
 
+class _FakeThumbnailsResource:
+    def __init__(self, exception=None, calls=None):
+        self._exception = exception
+        self._calls = calls if calls is not None else []
+
+    def set(self, videoId, media_body):
+        self._calls.append(videoId)
+        if self._exception is not None:
+            raise self._exception
+        return _Execute({})
+
+
 class FakeYouTubeClient:
     """Stands in for googleapiclient's youtube resource -- no network."""
 
@@ -38,12 +50,15 @@ class FakeYouTubeClient:
         list_response=None,
         channels_response=None,
         playlist_items_response=None,
+        thumbnail_exception=None,
     ):
         self._insert_response = insert_response
         self._insert_exception = insert_exception
         self._list_response = list_response
         self._channels_response = channels_response
         self._playlist_items_response = playlist_items_response
+        self.thumbnail_calls: list[str] = []
+        self._thumbnail_exception = thumbnail_exception
 
     def videos(self):
         return self
@@ -61,6 +76,9 @@ class FakeYouTubeClient:
 
     def playlistItems(self):
         return _FakePlaylistItemsResource(self._playlist_items_response)
+
+    def thumbnails(self):
+        return _FakeThumbnailsResource(exception=self._thumbnail_exception, calls=self.thumbnail_calls)
 
 
 @pytest.fixture
@@ -109,6 +127,32 @@ def test_validate_passes_for_valid_input(publisher, tmp_path):
 def test_upload_returns_job_handle_with_video_id(publisher, tmp_path):
     publisher._youtube = FakeYouTubeClient(insert_response={"id": "abc123"})
     handle = publisher.upload(_video(tmp_path), PlatformMetadata(title="Test", privacy="private"))
+    assert handle.platform_native_id == "abc123"
+
+
+def test_upload_sets_thumbnail_when_provided(publisher, tmp_path):
+    thumb = tmp_path / "thumb.jpg"
+    thumb.write_bytes(b"x")
+    fake = FakeYouTubeClient(insert_response={"id": "abc123"})
+    publisher._youtube = fake
+    publisher.upload(
+        _video(tmp_path),
+        PlatformMetadata(title="Test", privacy="private", thumbnail_path=thumb),
+    )
+    assert fake.thumbnail_calls == ["abc123"]
+
+
+def test_upload_succeeds_even_if_thumbnail_set_fails(publisher, tmp_path):
+    thumb = tmp_path / "thumb.jpg"
+    thumb.write_bytes(b"x")
+    fake = FakeYouTubeClient(
+        insert_response={"id": "abc123"}, thumbnail_exception=RuntimeError("boom")
+    )
+    publisher._youtube = fake
+    handle = publisher.upload(
+        _video(tmp_path),
+        PlatformMetadata(title="Test", privacy="private", thumbnail_path=thumb),
+    )
     assert handle.platform_native_id == "abc123"
 
 

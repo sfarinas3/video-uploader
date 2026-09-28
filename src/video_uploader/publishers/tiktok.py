@@ -139,6 +139,17 @@ class TikTokPublisher:
         # uploads are always private/self-view regardless of what's
         # requested (DESIGN.md §3/§8), so there's nothing to check.
 
+        if metadata.thumbnail_path:
+            # TikTok's only cover mechanism is video_cover_timestamp_ms --
+            # a millisecond offset selecting a frame from the uploaded
+            # video itself, not an external image upload. Rejected
+            # outright rather than silently ignored.
+            errors.append(
+                "TikTok's API doesn't support custom thumbnail images -- only frame "
+                "selection from the uploaded video itself, which this tool doesn't "
+                "yet expose -- leave the thumbnail blank for TikTok"
+            )
+
         return errors
 
     def _auth_headers(self) -> dict:

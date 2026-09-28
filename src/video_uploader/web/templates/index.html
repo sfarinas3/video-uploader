@@ -65,6 +65,26 @@
   </fieldset>
 
   <fieldset>
+    <legend>Thumbnails (optional)</legend>
+    <p class="note">
+      Only YouTube and Facebook support custom thumbnail images via their
+      APIs -- Instagram and TikTok will reject a job that has one attached.
+    </p>
+    <label>YouTube thumbnail
+      <input type="file" name="thumbnail_youtube" accept="image/*">
+    </label>
+    <label>Facebook thumbnail
+      <input type="file" name="thumbnail_facebook" accept="image/*">
+    </label>
+    <label>Instagram thumbnail (not supported -- leave blank)
+      <input type="file" name="thumbnail_instagram" accept="image/*">
+    </label>
+    <label>TikTok thumbnail (not supported -- leave blank)
+      <input type="file" name="thumbnail_tiktok" accept="image/*">
+    </label>
+  </fieldset>
+
+  <fieldset>
     <legend>When</legend>
     <label><input type="radio" name="when" value="now" checked onclick="toggleSchedule(false)"> Publish now</label>
     <label><input type="radio" name="when" value="schedule" onclick="toggleSchedule(true)"> Schedule for later</label>

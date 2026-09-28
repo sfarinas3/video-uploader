@@ -94,6 +94,15 @@ def test_validate_does_not_reject_any_privacy_value(publisher, tmp_path):
     assert errors == []
 
 
+def test_validate_rejects_thumbnail_path(publisher, tmp_path):
+    thumb = tmp_path / "thumb.jpg"
+    thumb.write_bytes(b"x")
+    errors = publisher.validate(
+        _video(tmp_path), PlatformMetadata(title="Test", thumbnail_path=thumb)
+    )
+    assert any("doesn't support custom thumbnail images" in e for e in errors)
+
+
 @pytest.mark.parametrize("privacy", ["private", "unlisted", "public"])
 def test_upload_always_sends_self_only_privacy_level(publisher, tmp_path, privacy):
     handle = publisher.upload(_video(tmp_path), PlatformMetadata(title="Test", privacy=privacy))

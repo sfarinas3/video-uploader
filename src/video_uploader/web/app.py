@@ -17,7 +17,7 @@ os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 from google_auth_oauthlib.flow import Flow
 
-from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -102,6 +102,10 @@ def create_job(
     when: str = Form("now"),
     scheduled_at: str = Form(""),
     scheduled_tz: str = Form(""),
+    thumbnail_youtube: UploadFile | None = File(default=None),
+    thumbnail_facebook: UploadFile | None = File(default=None),
+    thumbnail_instagram: UploadFile | None = File(default=None),
+    thumbnail_tiktok: UploadFile | None = File(default=None),
 ):
     if not platforms:
         return templates.TemplateResponse(
@@ -140,6 +144,27 @@ def create_job(
         p: (config.platforms.get(p, {}).get("default_format") or None) for p in platforms
     }
 
+    thumbnail_uploads = {
+        "youtube": thumbnail_youtube,
+        "facebook": thumbnail_facebook,
+        "instagram": thumbnail_instagram,
+        "tiktok": thumbnail_tiktok,
+    }
+    platform_overrides: dict[str, PlatformMetadata] = {}
+    for platform, thumb_file in thumbnail_uploads.items():
+        if not thumb_file or not thumb_file.filename:
+            continue
+        thumb_dest = config.storage.upload_dir / f"thumb_{platform}_{thumb_file.filename}"
+        with thumb_dest.open("wb") as out:
+            shutil.copyfileobj(thumb_file.file, out)
+        platform_overrides[platform] = PlatformMetadata(
+            title=title,
+            description=description,
+            tags=default_metadata.tags,
+            privacy=privacy,
+            thumbnail_path=thumb_dest,
+        )
+
     with Session(engine) as session:
         core_engine = CoreEngine(session)
         upload_job = core_engine.submit_job(
@@ -148,6 +173,7 @@ def create_job(
             publish_at=publish_at,
             tz=tz,
             platforms=platforms,
+            platform_overrides=platform_overrides,
             default_format_variants=default_format_variants,
         )
         if publish_at is None:

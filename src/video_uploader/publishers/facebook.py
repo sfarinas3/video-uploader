@@ -194,13 +194,32 @@ class FacebookPublisher:
                     files={"source": fh},
                 )
             response.raise_for_status()
+            video_id = response.json()["id"]
         except (TimeoutError, ConnectionError, httpx.TimeoutException):
             recovered_id = self._find_recently_uploaded_video(metadata.title)
-            if recovered_id is not None:
-                return JobHandle(platform_job_id=-1, platform_native_id=recovered_id)
-            raise
+            if recovered_id is None:
+                raise
+            video_id = recovered_id
 
-        return JobHandle(platform_job_id=-1, platform_native_id=response.json()["id"])
+        if metadata.thumbnail_path:
+            self._set_thumbnail_best_effort(video_id, metadata.thumbnail_path)
+
+        return JobHandle(platform_job_id=-1, platform_native_id=video_id)
+
+    def _set_thumbnail_best_effort(self, video_id: str, thumbnail_path) -> None:
+        """Same reasoning as youtube.py's _set_thumbnail_best_effort: the
+        video is already uploaded by this point, so a thumbnail failure
+        must never fail the whole platform job and orphan a successful
+        upload. Thumbnails are optional (DESIGN.md §6.4)."""
+        try:
+            with thumbnail_path.open("rb") as thumb_fh:
+                self._http.post(
+                    f"{GRAPH_API_BASE}/{video_id}/thumbnails",
+                    data={"is_preferred": "true", "access_token": self._page_access_token},
+                    files={"source": thumb_fh},
+                )
+        except Exception:  # noqa: BLE001 - best-effort, see docstring
+            pass
 
     def _find_recently_uploaded_video(self, title: str) -> str | None:
         response = self._http.get(

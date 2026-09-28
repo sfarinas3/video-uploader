@@ -116,15 +116,34 @@ class YouTubePublisher:
                 .insert(part="snippet,status", body=body, media_body=media)
                 .execute()
             )
+            video_id = response["id"]
         except (TimeoutError, ConnectionError):
             # Ambiguous: the request may have completed on YouTube's side
             # before the response reached us. Check for it before
             # reporting a failure that would invite a duplicate on retry.
             recovered_id = self._find_recently_uploaded_video(metadata.title)
-            if recovered_id is not None:
-                return JobHandle(platform_job_id=-1, platform_native_id=recovered_id)
-            raise
-        return JobHandle(platform_job_id=-1, platform_native_id=response["id"])
+            if recovered_id is None:
+                raise
+            video_id = recovered_id
+
+        if metadata.thumbnail_path:
+            self._set_thumbnail_best_effort(video_id, metadata.thumbnail_path)
+
+        return JobHandle(platform_job_id=-1, platform_native_id=video_id)
+
+    def _set_thumbnail_best_effort(self, video_id: str, thumbnail_path) -> None:
+        """The video itself is already uploaded by the time this runs --
+        a thumbnail failure here must never fail the whole platform job
+        (that would mark it FAILED without ever recording video_id,
+        orphaning an actually-successful upload, the same failure mode
+        the timeout-recovery logic above exists to avoid). Thumbnails are
+        explicitly optional (DESIGN.md §6.4); the video publish is not."""
+        try:
+            self._youtube.thumbnails().set(
+                videoId=video_id, media_body=MediaFileUpload(str(thumbnail_path))
+            ).execute()
+        except Exception:  # noqa: BLE001 - best-effort, see docstring
+            pass
 
     def _find_recently_uploaded_video(self, title: str) -> str | None:
         channel_resp = self._youtube.channels().list(part="contentDetails", mine=True).execute()
