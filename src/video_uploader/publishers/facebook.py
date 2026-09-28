@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mimetypes
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -17,7 +18,11 @@ from video_uploader.core.types import (
 PLATFORM = "facebook"
 GRAPH_API_VERSION = "v25.0"
 GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
-GRAPH_VIDEO_BASE = f"https://graph-video.facebook.com/{GRAPH_API_VERSION}"
+
+# Large-file transfer can legitimately take a while on a slow upload
+# connection -- much longer than the 30s default used for every other,
+# small/JSON Graph API call on self._http.
+RESUMABLE_UPLOAD_TRANSFER_TIMEOUT_SECONDS = 1800.0
 
 # Same 10-minute reconciliation window as the YouTube publisher -- a
 # client-side timeout while waiting for the upload response doesn't mean
@@ -130,6 +135,7 @@ class FacebookPublisher:
         config = load_config()
         platform_config = config.platforms.get(PLATFORM, {})
         self._configured_page_id = platform_config.get("page_id", "")
+        self._app_id = platform_config.get("app_id", "")
         self._page_id: str | None = None
         self._page_access_token: str | None = None
         self._http: httpx.Client | None = None
@@ -182,19 +188,16 @@ class FacebookPublisher:
         return {"published": "true"}
 
     def upload(self, video: VideoFile, metadata: PlatformMetadata) -> JobHandle:
-        data = {
-            "access_token": self._page_access_token,
-            "title": metadata.title,
-            "description": metadata.description,
-            **self._privacy_params(metadata.privacy),
-        }
         try:
-            with video.path.open("rb") as fh:
-                response = self._http.post(
-                    f"{GRAPH_VIDEO_BASE}/{self._page_id}/videos",
-                    data=data,
-                    files={"source": fh},
-                )
+            file_handle = self._upload_via_resumable_protocol(video)
+            data = {
+                "access_token": self._page_access_token,
+                "title": metadata.title,
+                "description": metadata.description,
+                "fbuploader_video_file_chunk": file_handle,
+                **self._privacy_params(metadata.privacy),
+            }
+            response = self._http.post(f"{GRAPH_API_BASE}/{self._page_id}/videos", data=data)
             response.raise_for_status()
             video_id = response.json()["id"]
         except (TimeoutError, ConnectionError, httpx.TimeoutException):
@@ -207,6 +210,48 @@ class FacebookPublisher:
             self._set_thumbnail_best_effort(video_id, metadata.thumbnail_path)
 
         return JobHandle(platform_job_id=-1, platform_native_id=video_id)
+
+    def _upload_via_resumable_protocol(self, video: VideoFile) -> str:
+        """Facebook's Graph API Resumable Upload protocol
+        (developers.facebook.com/docs/graph-api/guides/upload) -- required
+        for anything beyond trivially small files. The simple single
+        multipart POST this replaced (straight to graph-video.facebook.com)
+        hit a 413 well under Facebook's documented non-resumable size
+        guidance, confirmed live with a 700MB test upload.
+
+        Start: register an upload session and get back "upload:<id>".
+        Transfer: stream the file's bytes to that session in one request
+        (the protocol supports resuming a dropped transfer via a follow-up
+        GET for the current offset, but a single request is sufficient and
+        simplest for the file sizes this tool deals with). Returns the
+        resulting file handle, later passed to the /{page_id}/videos
+        publish call as fbuploader_video_file_chunk.
+        """
+        mime_type = mimetypes.guess_type(video.path.name)[0] or "video/mp4"
+        start_resp = self._http.post(
+            f"{GRAPH_API_BASE}/{self._app_id}/uploads",
+            params={
+                "file_name": video.path.name,
+                "file_length": video.size_bytes,
+                "file_type": mime_type,
+                "access_token": self._page_access_token,
+            },
+        )
+        start_resp.raise_for_status()
+        upload_session_id = start_resp.json()["id"]  # "upload:<UPLOAD_SESSION_ID>"
+
+        with video.path.open("rb") as fh:
+            transfer_resp = self._http.post(
+                f"{GRAPH_API_BASE}/{upload_session_id}",
+                headers={
+                    "Authorization": f"OAuth {self._page_access_token}",
+                    "file_offset": "0",
+                },
+                content=fh,
+                timeout=RESUMABLE_UPLOAD_TRANSFER_TIMEOUT_SECONDS,
+            )
+        transfer_resp.raise_for_status()
+        return transfer_resp.json()["h"]
 
     def _set_thumbnail_best_effort(self, video_id: str, thumbnail_path) -> None:
         """Same reasoning as youtube.py's _set_thumbnail_best_effort: the

@@ -19,7 +19,11 @@ class _FakeResponse:
 
 
 class FakeHttpClient:
-    """Stands in for httpx.Client -- no network."""
+    """Stands in for httpx.Client -- no network. Upload now makes three
+    POSTs (resumable-upload start, transfer, then the /videos publish
+    call) instead of one -- post_response/post_exception apply to the
+    final publish call, matching the pre-resumable-upload tests' intent
+    ("the upload timed out but Facebook actually created the video")."""
 
     def __init__(
         self,
@@ -28,6 +32,8 @@ class FakeHttpClient:
         get_response=None,
         recovery_response=None,
         thumbnail_exception=None,
+        start_response=None,
+        transfer_response=None,
     ):
         self._post_response = post_response
         self._post_exception = post_exception
@@ -36,13 +42,21 @@ class FakeHttpClient:
         self._get_call_count = 0
         self._thumbnail_exception = thumbnail_exception
         self.thumbnail_calls: list[str] = []
+        self._start_response = start_response or _FakeResponse({"id": "upload:SESSION123"})
+        self._transfer_response = transfer_response or _FakeResponse({"h": "HANDLE123"})
+        self.calls: list[tuple[str, dict]] = []
 
-    def post(self, url, data=None, files=None):
+    def post(self, url, data=None, files=None, params=None, headers=None, content=None, timeout=None):
+        self.calls.append((url, {"data": data, "params": params, "headers": headers}))
         if url.endswith("/thumbnails"):
             self.thumbnail_calls.append(url)
             if self._thumbnail_exception is not None:
                 raise self._thumbnail_exception
             return _FakeResponse({"success": True})
+        if url.endswith("/uploads"):
+            return self._start_response
+        if "/upload:" in url:
+            return self._transfer_response
         if self._post_exception is not None:
             raise self._post_exception
         return self._post_response
@@ -63,6 +77,7 @@ class FakeHttpClient:
 def publisher():
     pub = FacebookPublisher()
     pub._page_id = "123456"
+    pub._app_id = "999"
     pub._page_access_token = "fake-page-token"
     pub._http = FakeHttpClient()  # authenticate() is never called in these tests
     return pub
@@ -122,6 +137,26 @@ def test_upload_returns_job_handle_with_video_id(publisher, tmp_path):
     publisher._http = FakeHttpClient(post_response=_FakeResponse({"id": "abc123"}))
     handle = publisher.upload(_video(tmp_path), PlatformMetadata(title="Test", privacy="private"))
     assert handle.platform_native_id == "abc123"
+
+
+def test_upload_goes_through_resumable_protocol_not_a_single_multipart_post(publisher, tmp_path):
+    """Regression test: a single multipart POST straight to the /videos
+    edge hit a 413 on real, unremarkable-sized videos (confirmed live) --
+    upload() must go through the start/transfer/publish resumable-upload
+    sequence instead, and use the transfer step's returned file handle."""
+    fake = FakeHttpClient(post_response=_FakeResponse({"id": "abc123"}))
+    publisher._http = fake
+
+    publisher.upload(_video(tmp_path), PlatformMetadata(title="Test", privacy="private"))
+
+    urls = [url for url, _ in fake.calls]
+    assert urls == [
+        "https://graph.facebook.com/v25.0/999/uploads",
+        "https://graph.facebook.com/v25.0/upload:SESSION123",
+        "https://graph.facebook.com/v25.0/123456/videos",
+    ]
+    publish_data = fake.calls[2][1]["data"]
+    assert publish_data["fbuploader_video_file_chunk"] == "HANDLE123"
 
 
 def test_upload_sets_thumbnail_when_provided(publisher, tmp_path):
