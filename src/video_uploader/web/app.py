@@ -68,6 +68,7 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.run_startup_sweep()
+    scheduler.run_startup_purge()
     scheduler.start()
     oauth_https_catcher.start()
     yield

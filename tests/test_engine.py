@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from video_uploader.core.types import PlatformJobStatus, PlatformMetadata
-from video_uploader.models import PlatformJob
+from video_uploader.models import PlatformJob, UploadJob
 from video_uploader.publishers import PLATFORM_PUBLISHERS
 
 from conftest import FlakyPublisher
@@ -250,3 +250,42 @@ def test_persistent_get_status_failure_still_fails_the_job(core_engine, monkeypa
     youtube_job = job.platform_jobs[0]
     assert youtube_job.status == PlatformJobStatus.FAILED
     assert FlakyPublisher.calls.count("get_status") == 3  # retry.with_backoff's default max_attempts
+
+
+def test_purge_old_job_history_removes_only_jobs_past_retention(
+    core_engine, registered_publishers, session
+):
+    now = datetime.now(timezone.utc)
+    old_job = _submit(core_engine, ["youtube"])
+    old_job.created_at = now - timedelta(days=40)
+    recent_job = _submit(core_engine, ["youtube"])
+    recent_job.created_at = now - timedelta(days=5)
+    session.commit()
+
+    purged = core_engine.purge_old_job_history(retention_days=30, as_of=now)
+
+    assert purged == [old_job.id]
+    assert session.get(UploadJob, old_job.id) is None
+    assert session.get(UploadJob, recent_job.id) is not None
+
+
+def test_purge_old_job_history_cascade_deletes_platform_jobs(
+    core_engine, registered_publishers, session
+):
+    now = datetime.now(timezone.utc)
+    old_job = _submit(core_engine, ["youtube", "facebook"])
+    old_job.created_at = now - timedelta(days=400)  # older than the 365-day max too
+    platform_job_ids = [pj.id for pj in old_job.platform_jobs]
+    session.commit()
+
+    core_engine.purge_old_job_history(retention_days=365, as_of=now)
+
+    for platform_job_id in platform_job_ids:
+        assert session.get(PlatformJob, platform_job_id) is None
+
+
+def test_purge_old_job_history_is_noop_when_nothing_is_old(
+    core_engine, registered_publishers, session
+):
+    _submit(core_engine, ["youtube"])
+    assert core_engine.purge_old_job_history(retention_days=30) == []

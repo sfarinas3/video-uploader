@@ -25,10 +25,16 @@ class ServerConfig:
     port: int = 8000
 
 
+JOB_HISTORY_RETENTION_DAYS_MIN = 1
+JOB_HISTORY_RETENTION_DAYS_MAX = 365
+JOB_HISTORY_RETENTION_DAYS_DEFAULT = 30
+
+
 @dataclass
 class StorageConfig:
     db_path: Path = REPO_ROOT / "data" / "video_uploader.sqlite3"
     upload_dir: Path = REPO_ROOT / "data" / "uploads"
+    job_history_retention_days: int = JOB_HISTORY_RETENTION_DAYS_DEFAULT
 
 
 @dataclass
@@ -37,6 +43,14 @@ class AppConfig:
     storage: StorageConfig
     platforms: dict[str, dict[str, str]]
     config_path: Path
+
+
+def _clamped_retention_days(raw_value: object) -> int:
+    try:
+        days = int(raw_value)
+    except (TypeError, ValueError):
+        return JOB_HISTORY_RETENTION_DAYS_DEFAULT
+    return max(JOB_HISTORY_RETENTION_DAYS_MIN, min(days, JOB_HISTORY_RETENTION_DAYS_MAX))
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -63,6 +77,9 @@ def load_config(path: Path | None = None) -> AppConfig:
         storage=StorageConfig(
             db_path=REPO_ROOT / storage_raw.get("db_path", "data/video_uploader.sqlite3"),
             upload_dir=REPO_ROOT / storage_raw.get("upload_dir", "data/uploads"),
+            job_history_retention_days=_clamped_retention_days(
+                storage_raw.get("job_history_retention_days", JOB_HISTORY_RETENTION_DAYS_DEFAULT)
+            ),
         ),
         platforms=raw.get("platforms", {}),
         config_path=config_path,

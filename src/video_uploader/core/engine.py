@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -199,6 +199,37 @@ class CoreEngine:
             for upload_job in upload_jobs
             if any(pj.status == PlatformJobStatus.PENDING for pj in upload_job.platform_jobs)
         ]
+
+    def purge_old_job_history(
+        self, retention_days: int, as_of: datetime | None = None
+    ) -> list[int]:
+        """Deletes UploadJob/PlatformJob rows submitted more than
+        retention_days ago (config.yaml's storage.job_history_retention_days,
+        default 30, max 365) so Job status doesn't grow forever. Only
+        prunes history records -- the underlying video/thumbnail files on
+        disk are left untouched."""
+        as_of = as_of or datetime.now(timezone.utc)
+        cutoff = as_of - timedelta(days=retention_days)
+        old_jobs = self.session.exec(
+            select(UploadJob).where(UploadJob.created_at < cutoff)
+        ).all()
+
+        purged_ids: list[int] = []
+        for upload_job in old_jobs:
+            for platform_job in list(upload_job.platform_jobs):
+                self.session.delete(platform_job)
+            self.session.delete(upload_job)
+            purged_ids.append(upload_job.id)
+
+        self.session.commit()
+        if purged_ids:
+            logger.info(
+                "purged %d job(s) older than %d days: %s",
+                len(purged_ids),
+                retention_days,
+                purged_ids,
+            )
+        return purged_ids
 
     def reschedule_upload_job(self, upload_job_id: int, publish_at: datetime, tz: str) -> None:
         """Update an upload job's schedule and un-stick its MISSED platform

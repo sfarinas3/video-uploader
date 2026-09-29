@@ -10,6 +10,11 @@ server:
 storage:
   db_path: data/video_uploader.sqlite3
   upload_dir: data/uploads
+  # How long to keep finished job history (Job status page) before it's
+  # automatically purged, based on when each job was submitted. 1-365
+  # days; values outside that range are clamped. Only removes history
+  # records, never the underlying video/thumbnail files on disk.
+  job_history_retention_days: 30
 
 # default_format is the format variant used when a job doesn't set one
 # explicitly (e.g. "standard"/"shorts" for YouTube, "feed"/"reel"/"story"
