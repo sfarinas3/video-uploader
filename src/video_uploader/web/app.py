@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 # oauthlib refuses non-HTTPS OAuth by default. Our redirect URI is
@@ -88,6 +89,15 @@ UI_HIDDEN_PLATFORMS = {"tiktok"}
 # selected platforms are in this set, silently skipped for the rest.
 THUMBNAIL_SUPPORTED_PLATFORMS = {"youtube", "facebook"}
 
+# In-memory only (reset on restart) -- single-user local app, no need for
+# real persistence. _last_tag_search lets the Tag inspector tab show its
+# last results when you navigate back to it without re-querying YouTube
+# (search.list costs 100 quota units per call). _selected_upload_tags
+# accumulates tags clicked there so they can prefill the Upload tab's Tags
+# field, independent of whatever keyword is currently being viewed.
+_last_tag_search: dict | None = None
+_selected_upload_tags: list[str] = []
+
 WEB_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
@@ -127,6 +137,7 @@ def _index_context(error: str | None = None) -> dict:
         "timezones": TIMEZONE_NAMES,
         "missed_jobs": missed_jobs,
         "error": error,
+        "selected_tags_csv": ", ".join(_selected_upload_tags),
     }
 
 
@@ -284,15 +295,24 @@ def tag_inspector(request: Request, keyword: str = ""):
     """DESIGN.md milestone 10: standalone lookup tool, not part of any
     PlatformJob. YouTube-only -- Facebook/Instagram/TikTok have no
     equivalent official API for this."""
-    tags: list[tuple[str, int]] = []
+    global _last_tag_search
     error: str | None = None
+
     if keyword.strip():
         try:
             publisher = YouTubePublisher()
             publisher.authenticate()
             tags = publisher.find_top_tags(keyword.strip())
+            _last_tag_search = {"keyword": keyword.strip(), "tags": tags}
         except Exception as exc:  # noqa: BLE001 - surface as a page message, not a 500
             error = str(exc)
+    elif _last_tag_search is not None:
+        # No keyword in the URL -- e.g. clicked "Tag inspector" in the nav
+        # rather than following a search link. Show the last search
+        # instead of a blank form, without spending more YouTube quota.
+        keyword = _last_tag_search["keyword"]
+
+    tags = _last_tag_search["tags"] if _last_tag_search else []
 
     return templates.TemplateResponse(
         request,
@@ -300,10 +320,28 @@ def tag_inspector(request: Request, keyword: str = ""):
         {
             "keyword": keyword,
             "tags": tags,
-            "tag_names_csv": ", ".join(tag for tag, _ in tags),
             "error": error,
+            "selected_tags": _selected_upload_tags,
         },
     )
+
+
+@app.post("/tools/tags/toggle")
+def toggle_selected_tag(tag: str = Form(...), keyword: str = Form("")):
+    """Clicking a tag in the results table adds/removes it from the set
+    that prefills the Upload tab's Tags field -- accumulates across
+    different keyword searches, not scoped to whichever one is on screen."""
+    if tag in _selected_upload_tags:
+        _selected_upload_tags.remove(tag)
+    else:
+        _selected_upload_tags.append(tag)
+    return RedirectResponse(f"/tools/tags?keyword={quote(keyword)}", status_code=303)
+
+
+@app.post("/tools/tags/clear-selected")
+def clear_selected_tags(keyword: str = Form("")):
+    _selected_upload_tags.clear()
+    return RedirectResponse(f"/tools/tags?keyword={quote(keyword)}", status_code=303)
 
 
 @app.get("/jobs/{upload_job_id}/reschedule")

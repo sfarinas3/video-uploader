@@ -21,20 +21,35 @@
 <p class="error">{{ error }}</p>
 {% endif %}
 
+{% if selected_tags %}
+<p class="note">
+  Selected for upload: <strong>{{ selected_tags | join(", ") }}</strong>
+  -- prefilled into the Upload tab's Tags field.
+  <form action="/tools/tags/clear-selected" method="post" style="display:inline">
+    <input type="hidden" name="keyword" value="{{ keyword }}">
+    <button type="submit">Clear</button>
+  </form>
+</p>
+{% endif %}
+
 {% if keyword and not error %}
   {% if tags %}
-  <h3>Copy-paste tags</h3>
-  <p class="note">Ready to paste into the upload form's "Tags (comma-separated)" field:</p>
-  <p><code>{{ tag_names_csv }}</code></p>
-
   <h3>Ranked by frequency</h3>
+  <p class="note">Check a tag to add it to (or remove it from) your selection above.</p>
   <table>
     <thead>
-      <tr><th>Tag</th><th>Used by</th></tr>
+      <tr><th></th><th>Tag</th><th>Used by</th></tr>
     </thead>
     <tbody>
       {% for tag, count in tags %}
       <tr>
+        <td>
+          <form action="/tools/tags/toggle" method="post">
+            <input type="hidden" name="keyword" value="{{ keyword }}">
+            <input type="hidden" name="tag" value="{{ tag }}">
+            <input type="checkbox" onchange="this.form.submit()" {% if tag in selected_tags %}checked{% endif %}>
+          </form>
+        </td>
         <td>{{ tag }}</td>
         <td>{{ count }} video{{ "s" if count != 1 else "" }}</td>
       </tr>
