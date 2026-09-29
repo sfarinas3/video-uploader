@@ -1,6 +1,6 @@
 [project]
 name = "video-uploader"
-version = "0.1.0"
+version = "0.1.1"
 description = "Locally-run tool to publish a video to multiple social platforms."
 requires-python = ">=3.12"
 dependencies = [
