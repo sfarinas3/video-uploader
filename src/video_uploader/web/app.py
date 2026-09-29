@@ -260,7 +260,7 @@ def create_job(
         # on next launch) -- see scheduler.py.
         job_id = upload_job.id
 
-    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
+    return RedirectResponse(url=f"/jobs/{job_id}?submitted=1", status_code=303)
 
 
 @app.get("/jobs")
@@ -287,7 +287,11 @@ def job_detail(request: Request, job_id: int):
         return templates.TemplateResponse(
             request,
             "job_status.html",
-            {"jobs": [job], "retention_days": runtime_settings.get_retention_days()},
+            {
+                "jobs": [job],
+                "retention_days": runtime_settings.get_retention_days(),
+                "just_submitted": request.query_params.get("submitted") is not None,
+            },
         )
 
 

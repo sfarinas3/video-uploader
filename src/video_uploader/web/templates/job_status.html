@@ -10,6 +10,12 @@
 {% endfor %}
 {% endblock %}
 {% block content %}
+{% if just_submitted %}
+<p class="note" style="color:var(--success)">
+  <strong>Job submitted.</strong> Track its progress below -- this page updates automatically
+  while any platform is uploading or processing.
+</p>
+{% endif %}
 <p class="note">
   Keep job history for
   <form action="/jobs/retention-days" method="post" style="display:inline">
