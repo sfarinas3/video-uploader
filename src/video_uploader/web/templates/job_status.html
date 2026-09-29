@@ -3,7 +3,7 @@
 {% block head %}
 {% for job in jobs %}
   {% for pj in job.platform_jobs %}
-    {% if pj.status in ("uploading", "processing") %}
+    {% if pj.status in ("pending", "uploading", "processing") %}
 <meta http-equiv="refresh" content="5">
     {% endif %}
   {% endfor %}

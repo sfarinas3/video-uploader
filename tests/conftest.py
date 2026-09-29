@@ -32,8 +32,18 @@ def fake_keyring(monkeypatch):
 
 
 @pytest.fixture
-def engine():
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
+def engine(tmp_path):
+    # A real file, not sqlite:// in-memory: run_job now fans platform jobs
+    # out across worker threads, each opening its own Session/connection.
+    # An in-memory DB is a separate empty database per connection unless
+    # forced onto one shared connection (StaticPool) -- but that made
+    # genuinely concurrent threads share a single sqlite3 connection
+    # object, which isn't safe and reproduced real, flaky lost writes.
+    # A temp file matches production (also file-based) -- each thread gets
+    # its own connection and SQLite's normal file locking serializes
+    # writes correctly.
+    db_path = tmp_path / "test.sqlite3"
+    eng = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
     return eng
 

@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 import shutil
+import threading
 import zoneinfo
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -253,14 +254,26 @@ def create_job(
             platform_overrides=platform_overrides,
             default_format_variants=default_format_variants,
         )
-        if publish_at is None:
-            core_engine.run_job(upload_job.id)
-        # Scheduled jobs are picked up by the background poller (or, if
-        # the app isn't running when they come due, swept into `missed`
-        # on next launch) -- see scheduler.py.
         job_id = upload_job.id
 
+    if publish_at is None:
+        # Uploads run in the background so this request can redirect right
+        # away instead of the browser hanging until every platform upload
+        # finishes -- confirmed live, that made the submit button look like
+        # it did nothing for several minutes on a large file. The job
+        # starts out PENDING either way, so job_status.html's own
+        # auto-refresh picks up progress once this thread gets going.
+        threading.Thread(target=_run_job_in_background, args=(job_id,), daemon=True).start()
+    # Scheduled jobs are picked up by the background poller (or, if the app
+    # isn't running when they come due, swept into `missed` on next launch)
+    # -- see scheduler.py.
+
     return RedirectResponse(url=f"/jobs/{job_id}?submitted=1", status_code=303)
+
+
+def _run_job_in_background(upload_job_id: int) -> None:
+    with Session(engine) as session:
+        CoreEngine(session).run_job(upload_job_id)
 
 
 @app.get("/jobs")

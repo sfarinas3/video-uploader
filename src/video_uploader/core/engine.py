@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -86,18 +87,46 @@ class CoreEngine:
 
     def run_job(self, upload_job_id: int) -> None:
         """Run every pending platform job for this upload. Each platform is
-        isolated: an exception or missing publisher fails only that
-        platform's row."""
+        isolated (an exception or missing publisher fails only that
+        platform's row) and, since publisher.upload() is a long blocking
+        network call, they all run concurrently -- a slow YouTube upload
+        shouldn't hold up Facebook's. Each platform job gets its own thread
+        + DB session (SQLAlchemy sessions aren't safe to share across
+        threads); self.session is only used for the initial lookup here."""
         upload_job = self.session.get(UploadJob, upload_job_id)
         if upload_job is None:
             raise ValueError(f"No UploadJob with id {upload_job_id}")
 
         video = self._build_video_file(Path(upload_job.video_path))
+        pending_ids = [
+            platform_job.id
+            for platform_job in upload_job.platform_jobs
+            if platform_job.status == PlatformJobStatus.PENDING
+        ]
+        if not pending_ids:
+            return
 
-        for platform_job in upload_job.platform_jobs:
-            if platform_job.status != PlatformJobStatus.PENDING:
-                continue
-            self._run_platform_job(platform_job, upload_job, video)
+        with ThreadPoolExecutor(max_workers=len(pending_ids)) as pool:
+            list(pool.map(lambda pid: self._run_platform_job_isolated(pid, video), pending_ids))
+
+        # The worker threads committed through their own sessions, so
+        # self.session's identity map is now stale for anything it already
+        # had loaded (e.g. upload_job.platform_jobs, above) -- expire it so
+        # the caller sees the real post-run statuses rather than the
+        # PENDING snapshot from before the fan-out.
+        self.session.expire_all()
+
+    def _run_platform_job_isolated(self, platform_job_id: int, video: VideoFile) -> None:
+        """Worker-thread entry point for run_job's concurrent fan-out: opens
+        its own session rather than touching self.session from another
+        thread."""
+        with Session(self.session.get_bind()) as thread_session:
+            platform_job = thread_session.get(PlatformJob, platform_job_id)
+            if platform_job is None:
+                return
+            CoreEngine(thread_session)._run_platform_job(
+                platform_job, platform_job.upload_job, video
+            )
 
     def retry_platform_job(self, platform_job_id: int) -> None:
         """Re-run a single platform job without touching its siblings
