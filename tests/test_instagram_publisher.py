@@ -48,7 +48,7 @@ class FakeHttpClient:
         # was actually attempted).
         self._publish_attempted = False
 
-    def post(self, url, data=None, headers=None, content=None):
+    def post(self, url, data=None, headers=None, content=None, timeout=None):
         if "rupload.facebook.com" in url:
             return self._rupload_response
         if url.endswith("/media_publish"):
@@ -152,7 +152,7 @@ def test_upload_maps_format_variant_to_media_type(publisher, tmp_path, format_va
     captured = {}
 
     class CapturingHttpClient(FakeHttpClient):
-        def post(self, url, data=None, headers=None, content=None):
+        def post(self, url, data=None, headers=None, content=None, timeout=None):
             if data and "media_type" in data:
                 captured["media_type"] = data["media_type"]
             return super().post(url, data=data, headers=headers, content=content)

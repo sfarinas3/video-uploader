@@ -36,6 +36,14 @@ DEFAULT_MEDIA_TYPE = "REELS"
 UPLOAD_PROCESSING_POLL_SECONDS = 5
 UPLOAD_PROCESSING_TIMEOUT_SECONDS = 300
 
+# The rupload.facebook.com transfer itself can take a while on a large
+# file -- much longer than the 30s default used for every other, small/
+# JSON Graph API call on self._http. Same fix as facebook.py's
+# RESUMABLE_UPLOAD_TRANSFER_TIMEOUT_SECONDS; confirmed live, a 700MB
+# upload was hitting the 30s default and failing with "read operation
+# timed out".
+UPLOAD_TRANSFER_TIMEOUT_SECONDS = 1800.0
+
 # Same reasoning as facebook.py's TIMEOUT_RECOVERY_WINDOW_MINUTES, but only
 # applied around the media_publish call -- see upload()'s docstring.
 TIMEOUT_RECOVERY_WINDOW_SECONDS = 60
@@ -132,6 +140,7 @@ class InstagramPublisher:
                     "file_size": str(video.size_bytes),
                 },
                 content=fh.read(),
+                timeout=UPLOAD_TRANSFER_TIMEOUT_SECONDS,
             )
         upload_resp.raise_for_status()
 
