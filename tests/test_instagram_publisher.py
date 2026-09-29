@@ -162,6 +162,31 @@ def test_upload_maps_format_variant_to_media_type(publisher, tmp_path, format_va
     assert captured["media_type"] == expected_media_type
 
 
+def test_upload_sends_video_in_chunks_not_one_shot(publisher, tmp_path, monkeypatch):
+    """Regression test: a single-shot POST of the whole body reliably 400s
+    from rupload.facebook.com above ~30MB with a bare, useless
+    "ProcessingFailedError" -- confirmed live. upload() must split the
+    transfer into UPLOAD_CHUNK_SIZE_BYTES pieces via the offset header
+    instead, treating both 200 (done) and 206 (more expected) as success."""
+    monkeypatch.setattr(instagram, "UPLOAD_CHUNK_SIZE_BYTES", 4)
+    rupload_calls = []
+
+    class ChunkingHttpClient(FakeHttpClient):
+        def post(self, url, data=None, headers=None, content=None, timeout=None):
+            if "rupload.facebook.com" in url:
+                rupload_calls.append({"headers": headers, "content": content})
+                is_last = int(headers["offset"]) + len(content) >= int(headers["file_size"])
+                return _FakeResponse({"success": True}, status_code=200 if is_last else 206)
+            return super().post(url, data=data, headers=headers, content=content)
+
+    publisher._http = ChunkingHttpClient()
+    publisher.upload(_video(tmp_path, size=10), PlatformMetadata(title="Test"))
+
+    assert [c["headers"]["offset"] for c in rupload_calls] == ["0", "4", "8"]
+    assert [c["content"] for c in rupload_calls] == [b"xxxx", b"xxxx", b"xx"]
+    assert all(c["headers"]["file_size"] == "10" for c in rupload_calls)
+
+
 def test_upload_returns_job_handle_with_published_media_id(publisher, tmp_path):
     publisher._http = FakeHttpClient(publish_response=_FakeResponse({"id": "published999"}))
     handle = publisher.upload(_video(tmp_path), PlatformMetadata(title="Test"))

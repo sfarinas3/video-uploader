@@ -44,6 +44,17 @@ UPLOAD_PROCESSING_TIMEOUT_SECONDS = 300
 # timed out".
 UPLOAD_TRANSFER_TIMEOUT_SECONDS = 1800.0
 
+# rupload.facebook.com rejects a single request over some threshold
+# (confirmed live via bisection: a single-shot ~30MB body succeeded, ~37MB
+# reliably 400'd with a bare "ProcessingFailedError" -- no useful detail,
+# same failure shape as an oversized body hitting an edge/WAF limit) even
+# though the endpoint is well within Reels' documented 300MB total ceiling.
+# It does accept multiple smaller requests against the same container,
+# each covering a byte range via the offset header -- confirmed live with
+# 5MB chunks, so that's used unconditionally rather than only above the
+# threshold (keeps this one code path correct for every file size).
+UPLOAD_CHUNK_SIZE_BYTES = 5 * 1024 * 1024
+
 # Same reasoning as facebook.py's TIMEOUT_RECOVERY_WINDOW_MINUTES, but only
 # applied around the media_publish call -- see upload()'s docstring.
 TIMEOUT_RECOVERY_WINDOW_SECONDS = 60
@@ -131,18 +142,7 @@ class InstagramPublisher:
         container_resp.raise_for_status()
         container_id = container_resp.json()["id"]
 
-        with video.path.open("rb") as fh:
-            upload_resp = self._http.post(
-                f"{RUPLOAD_BASE}/{container_id}",
-                headers={
-                    "Authorization": f"OAuth {self._access_token}",
-                    "offset": "0",
-                    "file_size": str(video.size_bytes),
-                },
-                content=fh.read(),
-                timeout=UPLOAD_TRANSFER_TIMEOUT_SECONDS,
-            )
-        upload_resp.raise_for_status()
+        self._upload_via_rupload_chunks(container_id, video)
 
         self._wait_for_container_finished(container_id)
 
@@ -163,6 +163,29 @@ class InstagramPublisher:
                 raise
 
         return JobHandle(platform_job_id=-1, platform_native_id=media_id)
+
+    def _upload_via_rupload_chunks(self, container_id: str, video: VideoFile) -> None:
+        """Transfers video.path to rupload.facebook.com in
+        UPLOAD_CHUNK_SIZE_BYTES pieces via the offset/file_size headers.
+        200 means the file is fully received; 206 means this chunk landed
+        and more are expected -- both are success, anything else raises."""
+        with video.path.open("rb") as fh:
+            offset = 0
+            while offset < video.size_bytes:
+                chunk = fh.read(UPLOAD_CHUNK_SIZE_BYTES)
+                resp = self._http.post(
+                    f"{RUPLOAD_BASE}/{container_id}",
+                    headers={
+                        "Authorization": f"OAuth {self._access_token}",
+                        "offset": str(offset),
+                        "file_size": str(video.size_bytes),
+                    },
+                    content=chunk,
+                    timeout=UPLOAD_TRANSFER_TIMEOUT_SECONDS,
+                )
+                if resp.status_code not in (200, 206):
+                    resp.raise_for_status()
+                offset += len(chunk)
 
     def _wait_for_container_finished(self, container_id: str) -> None:
         deadline = time.monotonic() + UPLOAD_PROCESSING_TIMEOUT_SECONDS

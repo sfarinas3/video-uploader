@@ -101,7 +101,19 @@ THUMBNAIL_SUPPORTED_PLATFORMS = {"youtube", "facebook"}
 PLATFORM_SHORT_FORM_GUIDELINES = {
     "youtube": {"label": "YouTube Shorts", "max_duration_seconds": 180},
     "facebook": {"label": "Facebook Reels", "max_duration_seconds": 90},
-    "instagram": {"label": "Instagram Reels (full features/reach)", "max_duration_seconds": 90},
+    # Unlike the other platforms here, this is a hard API-enforced limit for
+    # Instagram, not just a placement/reach guideline -- see preflight.py's
+    # instagram max_duration_seconds for how this was confirmed live.
+    "instagram": {
+        "label": "Instagram Reels",
+        "max_duration_seconds": 75,
+        "hard_limit": True,
+        # 75s is the highest value confirmed working live, not the exact
+        # cutoff -- 80s reliably failed and the boundary wasn't bisected
+        # any further than that, so it's somewhere in (75, 80].
+        "note": "75s is a confirmed-safe value, not the exact cutoff -- "
+        "the true limit is somewhere between 75-80s",
+    },
     "tiktok": {"label": "TikTok", "max_duration_seconds": 600},
 }
 

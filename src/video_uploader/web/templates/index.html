@@ -77,10 +77,12 @@
     {% endfor %}
     {% if short_form_guidelines %}
     <p class="note">
-      Short-form/Reels placement guidance (not a hard limit -- a longer video
-      still uploads fine, it just may not get short-form placement):
+      Short-form/Reels duration guidance:
       {% for platform, guideline in short_form_guidelines.items() %}
-      {{ guideline.label }} up to {{ guideline.max_duration_seconds }}s{{ "; " if not loop.last else "." }}
+      {{ guideline.label }} up to {{ guideline.max_duration_seconds }}s
+      {%- if guideline.hard_limit %} (hard limit -- upload fails above this){% else %} (not a hard limit -- a longer video still uploads fine, it just may not get short-form placement){% endif -%}
+      {%- if guideline.note %} [{{ guideline.note }}]{% endif -%}
+      {{ "; " if not loop.last else "." }}
       {% endfor %}
     </p>
     {% endif %}
@@ -149,9 +151,13 @@
       checked.forEach(function (checkbox) {
         var guideline = SHORT_FORM_GUIDELINES[checkbox.value];
         if (guideline && duration > guideline.max_duration_seconds) {
+          var consequence = guideline.hard_limit
+            ? 'the upload to this platform will fail.'
+            : 'it just may not get short-form placement -- the upload itself will still work.';
+          var noteSuffix = guideline.note ? ' (' + guideline.note + ')' : '';
           warnings.push(
             guideline.label + ': this video (' + Math.round(duration) + 's) exceeds the ' +
-            guideline.max_duration_seconds + 's guideline for optimal placement/full features.'
+            guideline.max_duration_seconds + 's limit -- ' + consequence + noteSuffix
           );
         }
       });

@@ -43,7 +43,7 @@ def test_duration_below_minimum_is_rejected(platform, min_duration):
 
 @pytest.mark.parametrize(
     "platform,max_duration",
-    [("instagram", 900), ("tiktok", 600), ("facebook", 241 * 60)],
+    [("instagram", 75), ("tiktok", 600), ("facebook", 241 * 60)],
 )
 def test_duration_above_maximum_is_rejected(platform, max_duration):
     video = _video(duration_seconds=max_duration + 1)
@@ -58,7 +58,7 @@ def test_youtube_has_no_duration_check():
 
 @pytest.mark.parametrize(
     "platform,max_bytes", [("youtube", 256 * 1024**3), ("facebook", 10 * 1024**3),
-                            ("instagram", 1 * 1024**3), ("tiktok", 4 * 1024**3)]
+                            ("instagram", 300 * 1024**2), ("tiktok", 4 * 1024**3)]
 )
 def test_file_size_above_maximum_is_rejected(platform, max_bytes):
     video = _video(size_bytes=max_bytes + 1)

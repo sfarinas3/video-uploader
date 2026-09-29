@@ -18,8 +18,23 @@ PLATFORM_LIMITS: dict[str, dict] = {
     },
     "instagram": {
         "min_duration_seconds": 3,
-        "max_duration_seconds": 900,  # 15 min, Content Publishing API's technical ceiling
-        "max_size_bytes": 1 * 1024**3,
+        # Not the documented "15 min Content Publishing API ceiling" -- that
+        # figure doesn't hold for media_type=REELS, the only type this app
+        # actually uses now that plain VIDEO is deprecated (see
+        # instagram.py's FORMAT_TO_MEDIA_TYPE). Bisected live against the
+        # real API with several minimal-bitrate probe clips to isolate
+        # duration from file size: 75s uploads clean, 80s reliably 400s
+        # with a bare rupload.facebook.com "ProcessingFailedError" -- no
+        # size, bitrate, or codec involved, confirmed by holding file size
+        # near-constant (~1.5MB) across both. 75s is the confirmed-safe
+        # ceiling; the true cutoff is somewhere in (75, 80].
+        "max_duration_seconds": 75,
+        # Confirmed against Meta's own docs: Reels are capped at 300MB via
+        # the rupload API. A file between this and the old 1GB courtesy
+        # limit was passing this check and then getting a bare 400 Bad
+        # Request from rupload.facebook.com with no useful message --
+        # confirmed live.
+        "max_size_bytes": 300 * 1024**2,
         "allowed_codecs": {"h264", "hevc"},
         "min_aspect_ratio": 0.01,
         "max_aspect_ratio": 10.0,
