@@ -25,7 +25,7 @@ class ServerConfig:
     port: int = 8000
 
 
-JOB_HISTORY_RETENTION_DAYS_MIN = 1
+JOB_HISTORY_RETENTION_DAYS_MIN = 0  # 0 = purge on every cycle, keep no history
 JOB_HISTORY_RETENTION_DAYS_MAX = 365
 JOB_HISTORY_RETENTION_DAYS_DEFAULT = 30
 

@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
-from video_uploader import desktop_windows, oauth_https_catcher, scheduler, token_store
+from video_uploader import desktop_windows, oauth_https_catcher, runtime_settings, scheduler, token_store
 from video_uploader.config import load_config
 from video_uploader.core.engine import CoreEngine
 from video_uploader.core.types import Platform, PlatformJobStatus, PlatformMetadata
@@ -248,15 +248,34 @@ def create_job(
 def list_jobs(request: Request):
     with Session(engine) as session:
         jobs = session.exec(select(UploadJob).order_by(UploadJob.created_at.desc())).all()
-        return templates.TemplateResponse(request, "job_status.html", {"jobs": jobs})
+        return templates.TemplateResponse(
+            request,
+            "job_status.html",
+            {"jobs": jobs, "retention_days": runtime_settings.get_retention_days()},
+        )
 
 
 @app.get("/jobs/{job_id}")
 def job_detail(request: Request, job_id: int):
     with Session(engine) as session:
         job = session.get(UploadJob, job_id)
-        jobs = [job] if job else []
-        return templates.TemplateResponse(request, "job_status.html", {"jobs": jobs})
+        if job is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Job #{job_id} not found -- it may have been purged from history "
+                "(see the retention setting at the top of Job status).",
+            )
+        return templates.TemplateResponse(
+            request,
+            "job_status.html",
+            {"jobs": [job], "retention_days": runtime_settings.get_retention_days()},
+        )
+
+
+@app.post("/jobs/retention-days")
+def set_job_history_retention_days(retention_days: int = Form(...)):
+    runtime_settings.set_retention_days(retention_days)
+    return RedirectResponse(url="/jobs", status_code=303)
 
 
 @app.post("/jobs/platform/{platform_job_id}/refresh")

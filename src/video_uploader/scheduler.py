@@ -5,7 +5,7 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session
 
-from video_uploader.config import load_config
+from video_uploader import runtime_settings
 from video_uploader.core.engine import CoreEngine
 from video_uploader.db import get_engine
 
@@ -45,13 +45,13 @@ def run_startup_purge() -> None:
     """Mirrors run_startup_sweep -- prune old job history once at launch,
     in addition to the recurring daily purge, so a long gap between runs
     doesn't leave stale history sitting around until the next interval."""
-    retention_days = load_config().storage.job_history_retention_days
+    retention_days = runtime_settings.get_retention_days()
     with Session(get_engine()) as session:
         CoreEngine(session).purge_old_job_history(retention_days)
 
 
 def _purge_old_job_history() -> None:
-    retention_days = load_config().storage.job_history_retention_days
+    retention_days = runtime_settings.get_retention_days()
     with Session(get_engine()) as session:
         CoreEngine(session).purge_old_job_history(retention_days)
 

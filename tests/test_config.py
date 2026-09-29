@@ -17,8 +17,11 @@ def test_clamped_retention_days_caps_at_one_year():
     assert _clamped_retention_days(1000) == JOB_HISTORY_RETENTION_DAYS_MAX
 
 
-def test_clamped_retention_days_floors_at_one_day():
-    assert _clamped_retention_days(0) == JOB_HISTORY_RETENTION_DAYS_MIN
+def test_clamped_retention_days_allows_zero():
+    assert _clamped_retention_days(0) == 0
+
+
+def test_clamped_retention_days_floors_at_zero():
     assert _clamped_retention_days(-5) == JOB_HISTORY_RETENTION_DAYS_MIN
 
 

@@ -10,6 +10,15 @@
 {% endfor %}
 {% endblock %}
 {% block content %}
+<p class="note">
+  Keep job history for
+  <form action="/jobs/retention-days" method="post" style="display:inline">
+    <input type="number" name="retention_days" min="0" max="365" value="{{ retention_days }}" style="width:4em">
+    days
+    <button type="submit">Save</button>
+  </form>
+  (0-365; older records are purged automatically -- video/thumbnail files on disk aren't touched)
+</p>
 {% if not jobs %}
   <p>No jobs yet.</p>
 {% endif %}
