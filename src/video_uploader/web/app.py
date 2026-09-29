@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
-from video_uploader import oauth_https_catcher, scheduler, token_store
+from video_uploader import desktop_windows, oauth_https_catcher, scheduler, token_store
 from video_uploader.config import load_config
 from video_uploader.core.engine import CoreEngine
 from video_uploader.core.types import Platform, PlatformJobStatus, PlatformMetadata
@@ -513,6 +513,9 @@ def youtube_oauth_callback(request: Request):
             "scopes": list(credentials.scopes or YOUTUBE_SCOPES),
         },
     )
+    settings_url = f"http://{config.server.host}:{config.server.port}/settings"
+    desktop_windows.close_popup()
+    desktop_windows.refresh_main_window(settings_url)
     return RedirectResponse(url="/settings")
 
 
@@ -585,6 +588,19 @@ def _wait_until_serving(host: str, port: int, timeout_seconds: float = 10.0) -> 
     raise RuntimeError(f"Server did not start listening on {host}:{port} in time")
 
 
+class DesktopApi:
+    """Exposed to the main window's page JS as `pywebview.api` (see
+    js_api= below) -- lets Settings ask Python to open a second native
+    window for a platform's OAuth connect flow, instead of navigating the
+    main window away to an external site."""
+
+    def open_oauth_popup(self, platform: str) -> None:
+        if platform not in ("youtube", "facebook", "tiktok"):
+            return
+        url = f"http://{config.server.host}:{config.server.port}/oauth/{platform}/start"
+        desktop_windows.open_popup(f"Connect {platform.capitalize()}", url)
+
+
 def main() -> None:
     """Entry point for both the `video-uploader` console script
     (pyproject.toml's [project.scripts]) and run.py. Runs the FastAPI app on
@@ -602,7 +618,7 @@ def main() -> None:
     server_thread.start()
     _wait_until_serving(config.server.host, config.server.port)
 
-    webview.create_window(
+    main_window = webview.create_window(
         "Video Uploader",
         f"http://{config.server.host}:{config.server.port}",
         width=1100,
@@ -612,5 +628,7 @@ def main() -> None:
         # but this app's whole point is showing IDs/URLs/error messages the
         # user needs to copy elsewhere.
         text_select=True,
+        js_api=DesktopApi(),
     )
+    desktop_windows.set_main_window(main_window)
     webview.start()

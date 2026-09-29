@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
+from video_uploader import desktop_windows
 from video_uploader.publishers.facebook import complete_oauth as facebook_complete_oauth
 from video_uploader.publishers.tiktok import complete_oauth as tiktok_complete_oauth
 
@@ -135,6 +136,9 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+
+        desktop_windows.close_popup()
+        desktop_windows.refresh_main_window(MAIN_APP_SETTINGS_URL)
 
         self.send_response(302)
         self.send_header("Location", MAIN_APP_SETTINGS_URL)

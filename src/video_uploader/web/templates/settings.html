@@ -19,6 +19,7 @@
   </form>
   (reuse an existing one, or create a new one anywhere -- applies immediately)
 </p>
+<h2>Connections</h2>
 <table>
   <thead>
     <tr><th>Platform</th><th>Status</th><th></th></tr>
@@ -55,14 +56,14 @@
       </td>
       <td>
         {% if platform == "youtube" %}
-          <a href="/oauth/youtube/start">{{ "Reconnect" if connected[platform] else "Connect" }}</a>
+          <button onclick="connectPlatform('youtube')">{{ "Reconnect" if connected[platform] else "Connect" }}</button>
         {% elif platform == "facebook" %}
-          <a href="/oauth/facebook/start">{{ "Reconnect" if connected[platform] else "Connect" }}</a>
+          <button onclick="connectPlatform('facebook')">{{ "Reconnect" if connected[platform] else "Connect" }}</button>
           (also connects Instagram, if this Page has a linked Business account)
         {% elif platform == "instagram" %}
           use the Facebook row above
         {% elif platform == "tiktok" %}
-          <a href="/oauth/tiktok/start">{{ "Reconnect" if connected[platform] else "Connect" }}</a>
+          <button onclick="connectPlatform('tiktok')">{{ "Reconnect" if connected[platform] else "Connect" }}</button>
         {% else %}
           not implemented yet
         {% endif %}
@@ -71,4 +72,18 @@
     {% endfor %}
   </tbody>
 </table>
+
+<script>
+  function connectPlatform(platform) {
+    // Opens the platform's login in a separate native window so this
+    // Settings page stays put, instead of navigating this window away to
+    // an external site. Falls back to plain navigation outside the
+    // desktop app (e.g. testing in a regular browser tab).
+    if (window.pywebview) {
+      pywebview.api.open_oauth_popup(platform);
+    } else {
+      window.location.href = '/oauth/' + platform + '/start';
+    }
+  }
+</script>
 {% endblock %}
