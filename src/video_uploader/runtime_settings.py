@@ -13,7 +13,9 @@ from video_uploader.config import (
     load_config,
 )
 
-_RETENTION_OVERRIDE_PATH = load_config().storage.db_path.parent / "job_history_retention_days.txt"
+_DATA_DIR = load_config().storage.db_path.parent
+_RETENTION_OVERRIDE_PATH = _DATA_DIR / "job_history_retention_days.txt"
+_DISMISSED_MISSED_JOBS_PATH = _DATA_DIR / "dismissed_missed_job_ids.txt"
 
 
 def _clamp(days: int) -> int:
@@ -34,3 +36,27 @@ def set_retention_days(days: int) -> int:
     _RETENTION_OVERRIDE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _RETENTION_OVERRIDE_PATH.write_text(str(clamped))
     return clamped
+
+
+def get_dismissed_missed_job_ids() -> set[int]:
+    if not _DISMISSED_MISSED_JOBS_PATH.exists():
+        return set()
+    ids: set[int] = set()
+    for line in _DISMISSED_MISSED_JOBS_PATH.read_text().splitlines():
+        line = line.strip()
+        if line:
+            try:
+                ids.add(int(line))
+            except ValueError:
+                pass  # corrupt line -- skip it rather than fail the whole read
+    return ids
+
+
+def dismiss_missed_job_ids(platform_job_ids: list[int]) -> None:
+    """Persists dismissed missed-upload banner entries so they stay
+    dismissed across relaunches -- previously in-memory only, which meant
+    they'd all reappear on every restart."""
+    ids = get_dismissed_missed_job_ids()
+    ids.update(platform_job_ids)
+    _DISMISSED_MISSED_JOBS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _DISMISSED_MISSED_JOBS_PATH.write_text("\n".join(str(i) for i in sorted(ids)))
