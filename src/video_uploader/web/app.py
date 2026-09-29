@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -90,6 +91,19 @@ UI_HIDDEN_PLATFORMS = {"tiktok"}
 # selected platforms are in this set, silently skipped for the rest.
 THUMBNAIL_SUPPORTED_PLATFORMS = {"youtube", "facebook"}
 
+# Short-form/Reels-style placement guidance -- NOT hard limits (those are
+# preflight.py's job, enforced server-side before upload). These are
+# "optimal reach/full features" thresholds the platforms themselves
+# recommend; a video over them still uploads fine, it just may not get
+# Shorts/Reels placement. Checked client-side against the selected file
+# (see index.html) so the warning shows before submitting, not after.
+PLATFORM_SHORT_FORM_GUIDELINES = {
+    "youtube": {"label": "YouTube Shorts", "max_duration_seconds": 180},
+    "facebook": {"label": "Facebook Reels", "max_duration_seconds": 90},
+    "instagram": {"label": "Instagram Reels (full features/reach)", "max_duration_seconds": 90},
+    "tiktok": {"label": "TikTok", "max_duration_seconds": 600},
+}
+
 # In-memory only (reset on restart) -- single-user local app, no need for
 # real persistence. _last_tag_search lets the Tag inspector tab show its
 # last results when you navigate back to it without re-querying YouTube
@@ -139,12 +153,20 @@ def _index_context(error: str | None = None) -> dict:
         # Access upload_job while the session is still open so the
         # template can read titles without a DetachedInstanceError.
         missed_jobs = [(pj, pj.upload_job) for pj in missed_jobs]
+    visible_platforms = [p.value for p in Platform if p.value not in UI_HIDDEN_PLATFORMS]
+    short_form_guidelines = {
+        p: PLATFORM_SHORT_FORM_GUIDELINES[p]
+        for p in visible_platforms
+        if p in PLATFORM_SHORT_FORM_GUIDELINES
+    }
     return {
-        "platforms": [p.value for p in Platform if p.value not in UI_HIDDEN_PLATFORMS],
+        "platforms": visible_platforms,
         "timezones": TIMEZONE_NAMES,
         "missed_jobs": missed_jobs,
         "error": error,
         "selected_tags_csv": ", ".join(_selected_upload_tags),
+        "short_form_guidelines": short_form_guidelines,
+        "short_form_guidelines_json": json.dumps(short_form_guidelines),
     }
 
 

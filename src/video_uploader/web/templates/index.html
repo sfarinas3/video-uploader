@@ -46,8 +46,9 @@
 
 <form action="/jobs" method="post" enctype="multipart/form-data">
   <label>Video file
-    <input type="file" name="video" accept="video/*" required>
+    <input type="file" name="video" accept="video/*" required id="video-file" onchange="updateShortFormWarnings()">
   </label>
+  <video id="duration-probe" style="display:none"></video>
 
   <label>Title
     <input type="text" name="title" required>
@@ -72,8 +73,18 @@
   <fieldset>
     <legend>Platforms</legend>
     {% for platform in platforms %}
-    <label><input type="checkbox" name="platforms" value="{{ platform }}"> {{ platform }}</label>
+    <label><input type="checkbox" name="platforms" value="{{ platform }}" onchange="updateShortFormWarnings()"> {{ platform }}</label>
     {% endfor %}
+    {% if short_form_guidelines %}
+    <p class="note">
+      Short-form/Reels placement guidance (not a hard limit -- a longer video
+      still uploads fine, it just may not get short-form placement):
+      {% for platform, guideline in short_form_guidelines.items() %}
+      {{ guideline.label }} up to {{ guideline.max_duration_seconds }}s{{ "; " if not loop.last else "." }}
+      {% endfor %}
+    </p>
+    {% endif %}
+    <div id="short-form-warnings"></div>
   </fieldset>
 
   <fieldset>
@@ -116,6 +127,40 @@
 </form>
 
 <script>
+  var SHORT_FORM_GUIDELINES = {{ short_form_guidelines_json | safe }};
+
+  function updateShortFormWarnings() {
+    var warningsEl = document.getElementById('short-form-warnings');
+    var fileInput = document.getElementById('video-file');
+    warningsEl.innerHTML = '';
+    if (!fileInput.files || !fileInput.files[0]) {
+      return;
+    }
+    var probe = document.getElementById('duration-probe');
+    probe.src = URL.createObjectURL(fileInput.files[0]);
+    probe.onloadedmetadata = function () {
+      var duration = probe.duration;
+      URL.revokeObjectURL(probe.src);
+      if (!isFinite(duration)) {
+        return;
+      }
+      var checked = document.querySelectorAll('input[name="platforms"]:checked');
+      var warnings = [];
+      checked.forEach(function (checkbox) {
+        var guideline = SHORT_FORM_GUIDELINES[checkbox.value];
+        if (guideline && duration > guideline.max_duration_seconds) {
+          warnings.push(
+            guideline.label + ': this video (' + Math.round(duration) + 's) exceeds the ' +
+            guideline.max_duration_seconds + 's guideline for optimal placement/full features.'
+          );
+        }
+      });
+      if (warnings.length) {
+        warningsEl.innerHTML = '<p class="warning">' + warnings.join('<br>') + '</p>';
+      }
+    };
+  }
+
   function toggleSchedule(show) {
     document.getElementById('schedule-fields').style.display = show ? 'block' : 'none';
   }
