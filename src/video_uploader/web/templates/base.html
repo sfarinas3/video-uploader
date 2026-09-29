@@ -1,8 +1,9 @@
+{% set theme = request.cookies.get("theme", "dark") %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if theme == "light" %} data-theme="light"{% endif %}>
 <head>
   <meta charset="utf-8">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="{{ theme }}">
   <title>{% block title %}Video Uploader{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
   {% block head %}{% endblock %}

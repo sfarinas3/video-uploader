@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Settings{% endblock %}
 {% block content %}
+<p class="note">
+  Theme:
+  <form action="/settings/theme" method="post" style="display:inline">
+    <label><input type="radio" name="theme" value="dark" onchange="this.form.submit()" {% if theme != "light" %}checked{% endif %}> Dark</label>
+    <label><input type="radio" name="theme" value="light" onchange="this.form.submit()" {% if theme == "light" %}checked{% endif %}> Light</label>
+  </form>
+  (Dark is the default)
+</p>
 {% if config_file_changed %}
 <p class="note">Now using the newly-selected config file below -- no restart needed.</p>
 {% endif %}

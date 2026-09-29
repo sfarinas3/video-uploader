@@ -400,6 +400,17 @@ def _reload_config_from(path: Path) -> None:
     config.config_path = new_config.config_path
 
 
+@app.post("/settings/theme")
+def set_theme(theme: str = Form("dark")):
+    if theme not in ("dark", "light"):
+        theme = "dark"
+    response = RedirectResponse("/settings", status_code=303)
+    # A year is effectively "forever" for a locally-run app with no
+    # server-side account -- there's nothing else to key this to.
+    response.set_cookie("theme", theme, max_age=60 * 60 * 24 * 365)
+    return response
+
+
 @app.post("/settings/choose-config-file")
 def choose_config_file():
     """Opens the same native file picker launcher.py uses on startup, lets

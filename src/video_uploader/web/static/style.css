@@ -1,4 +1,20 @@
+/* Dark is the app's default (set from Settings), not just an OS-preference
+   fallback -- :root holds the dark values, [data-theme="light"] overrides
+   them when the user explicitly picks Light from Settings. */
 :root {
+  --bg: #1a1a1a;
+  --fg: #e8e8e8;
+  --muted: #a0a0a0;
+  --border: #3a3a3a;
+  --error: #ff6b5b;
+  --success: #4caf6e;
+  --warning: #e0b040;
+  --input-bg: #2a2a2a;
+  --input-border: #4a4a4a;
+  --code-bg: #262626;
+}
+
+:root[data-theme="light"] {
   --bg: #ffffff;
   --fg: #1a1a1a;
   --muted: #666666;
@@ -9,21 +25,6 @@
   --input-bg: #ffffff;
   --input-border: #cccccc;
   --code-bg: #f2f2f2;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1a1a1a;
-    --fg: #e8e8e8;
-    --muted: #a0a0a0;
-    --border: #3a3a3a;
-    --error: #ff6b5b;
-    --success: #4caf6e;
-    --warning: #e0b040;
-    --input-bg: #2a2a2a;
-    --input-border: #4a4a4a;
-    --code-bg: #262626;
-  }
 }
 
 body {
