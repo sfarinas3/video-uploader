@@ -83,6 +83,11 @@ app = FastAPI(title="Video Uploader", lifespan=lifespan)
 # bring back once that's resolved.
 UI_HIDDEN_PLATFORMS = {"tiktok"}
 
+# Only these platforms' APIs support attaching a custom thumbnail image --
+# the upload form has a single thumbnail field applied to whichever
+# selected platforms are in this set, silently skipped for the rest.
+THUMBNAIL_SUPPORTED_PLATFORMS = {"youtube", "facebook"}
+
 WEB_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
@@ -142,10 +147,7 @@ def create_job(
     when: str = Form("now"),
     scheduled_at: str = Form(""),
     scheduled_tz: str = Form(""),
-    thumbnail_youtube: UploadFile | None = File(default=None),
-    thumbnail_facebook: UploadFile | None = File(default=None),
-    thumbnail_instagram: UploadFile | None = File(default=None),
-    thumbnail_tiktok: UploadFile | None = File(default=None),
+    thumbnail: UploadFile | None = File(default=None),
 ):
     if not platforms:
         return templates.TemplateResponse(
@@ -184,26 +186,21 @@ def create_job(
         p: (config.platforms.get(p, {}).get("default_format") or None) for p in platforms
     }
 
-    thumbnail_uploads = {
-        "youtube": thumbnail_youtube,
-        "facebook": thumbnail_facebook,
-        "instagram": thumbnail_instagram,
-        "tiktok": thumbnail_tiktok,
-    }
     platform_overrides: dict[str, PlatformMetadata] = {}
-    for platform, thumb_file in thumbnail_uploads.items():
-        if not thumb_file or not thumb_file.filename:
-            continue
-        thumb_dest = config.storage.upload_dir / f"thumb_{platform}_{thumb_file.filename}"
+    if thumbnail and thumbnail.filename:
+        thumb_dest = config.storage.upload_dir / f"thumb_{thumbnail.filename}"
         with thumb_dest.open("wb") as out:
-            shutil.copyfileobj(thumb_file.file, out)
-        platform_overrides[platform] = PlatformMetadata(
-            title=title,
-            description=description,
-            tags=default_metadata.tags,
-            privacy=privacy,
-            thumbnail_path=thumb_dest,
-        )
+            shutil.copyfileobj(thumbnail.file, out)
+        for platform in platforms:
+            if platform not in THUMBNAIL_SUPPORTED_PLATFORMS:
+                continue
+            platform_overrides[platform] = PlatformMetadata(
+                title=title,
+                description=description,
+                tags=default_metadata.tags,
+                privacy=privacy,
+                thumbnail_path=thumb_dest,
+            )
 
     with Session(engine) as session:
         core_engine = CoreEngine(session)
