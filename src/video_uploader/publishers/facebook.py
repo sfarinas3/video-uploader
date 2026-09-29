@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import mimetypes
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -135,7 +134,6 @@ class FacebookPublisher:
         config = load_config()
         platform_config = config.platforms.get(PLATFORM, {})
         self._configured_page_id = platform_config.get("page_id", "")
-        self._app_id = platform_config.get("app_id", "")
         self._page_id: str | None = None
         self._page_access_token: str | None = None
         self._http: httpx.Client | None = None
@@ -189,17 +187,7 @@ class FacebookPublisher:
 
     def upload(self, video: VideoFile, metadata: PlatformMetadata) -> JobHandle:
         try:
-            file_handle = self._upload_via_resumable_protocol(video)
-            data = {
-                "access_token": self._page_access_token,
-                "title": metadata.title,
-                "description": metadata.description,
-                "fbuploader_video_file_chunk": file_handle,
-                **self._privacy_params(metadata.privacy),
-            }
-            response = self._http.post(f"{GRAPH_API_BASE}/{self._page_id}/videos", data=data)
-            response.raise_for_status()
-            video_id = response.json()["id"]
+            video_id = self._upload_via_chunked_protocol(video, metadata)
         except (TimeoutError, ConnectionError, httpx.TimeoutException):
             recovered_id = self._find_recently_uploaded_video(metadata.title)
             if recovered_id is None:
@@ -211,47 +199,76 @@ class FacebookPublisher:
 
         return JobHandle(platform_job_id=-1, platform_native_id=video_id)
 
-    def _upload_via_resumable_protocol(self, video: VideoFile) -> str:
-        """Facebook's Graph API Resumable Upload protocol
-        (developers.facebook.com/docs/graph-api/guides/upload) -- required
-        for anything beyond trivially small files. The simple single
-        multipart POST this replaced (straight to graph-video.facebook.com)
-        hit a 413 well under Facebook's documented non-resumable size
-        guidance, confirmed live with a 700MB test upload.
+    def _upload_via_chunked_protocol(self, video: VideoFile, metadata: PlatformMetadata) -> str:
+        """Facebook's chunked video upload protocol -- upload_phase=start/
+        transfer/finish directly on /{page_id}/videos
+        (developers.facebook.com/docs/graph-api/reference/page/videos/).
 
-        Start: register an upload session and get back "upload:<id>".
-        Transfer: stream the file's bytes to that session in one request
-        (the protocol supports resuming a dropped transfer via a follow-up
-        GET for the current offset, but a single request is sufficient and
-        simplest for the file sizes this tool deals with). Returns the
-        resulting file handle, later passed to the /{page_id}/videos
-        publish call as fbuploader_video_file_chunk.
+        Replaces an earlier attempt at the newer generic Resumable Upload
+        API (POST /{app_id}/uploads + /upload:<id>): that one hit a 413 on
+        the plain single-POST approach it replaced, then -- confirmed live
+        with a real 700MB file -- returned a malformed multi-segment file
+        handle from the transfer step instead of one clean handle, and
+        neither passing that through as-is nor using just its last segment
+        produced a video Facebook could actually process. This protocol
+        sidesteps that: the *server* tells us the chunk size via each
+        response's start_offset/end_offset, rather than us guessing a
+        fixed size or sending the whole file in one shot.
+
+        Start: register the session, get back video_id + the first
+        start_offset/end_offset. Transfer: loop, sending exactly the byte
+        range the last response asked for, until start_offset == end_offset
+        (upload complete). Finish: attach title/description/privacy and
+        publish. Returns the video_id from the start phase throughout.
         """
-        mime_type = mimetypes.guess_type(video.path.name)[0] or "video/mp4"
         start_resp = self._http.post(
-            f"{GRAPH_API_BASE}/{self._app_id}/uploads",
-            params={
-                "file_name": video.path.name,
-                "file_length": video.size_bytes,
-                "file_type": mime_type,
+            f"{GRAPH_API_BASE}/{self._page_id}/videos",
+            data={
+                "upload_phase": "start",
+                "file_size": video.size_bytes,
                 "access_token": self._page_access_token,
             },
         )
         start_resp.raise_for_status()
-        upload_session_id = start_resp.json()["id"]  # "upload:<UPLOAD_SESSION_ID>"
+        start_data = start_resp.json()
+        video_id = start_data["video_id"]
+        upload_session_id = start_data["upload_session_id"]
+        start_offset = int(start_data["start_offset"])
+        end_offset = int(start_data["end_offset"])
 
         with video.path.open("rb") as fh:
-            transfer_resp = self._http.post(
-                f"{GRAPH_API_BASE}/{upload_session_id}",
-                headers={
-                    "Authorization": f"OAuth {self._page_access_token}",
-                    "file_offset": "0",
-                },
-                content=fh,
-                timeout=RESUMABLE_UPLOAD_TRANSFER_TIMEOUT_SECONDS,
-            )
-        transfer_resp.raise_for_status()
-        return transfer_resp.json()["h"]
+            while start_offset != end_offset:
+                fh.seek(start_offset)
+                chunk = fh.read(end_offset - start_offset)
+                transfer_resp = self._http.post(
+                    f"{GRAPH_API_BASE}/{self._page_id}/videos",
+                    data={
+                        "upload_phase": "transfer",
+                        "upload_session_id": upload_session_id,
+                        "start_offset": start_offset,
+                        "access_token": self._page_access_token,
+                    },
+                    files={"video_file_chunk": chunk},
+                    timeout=RESUMABLE_UPLOAD_TRANSFER_TIMEOUT_SECONDS,
+                )
+                transfer_resp.raise_for_status()
+                transfer_data = transfer_resp.json()
+                start_offset = int(transfer_data["start_offset"])
+                end_offset = int(transfer_data["end_offset"])
+
+        finish_resp = self._http.post(
+            f"{GRAPH_API_BASE}/{self._page_id}/videos",
+            data={
+                "upload_phase": "finish",
+                "upload_session_id": upload_session_id,
+                "access_token": self._page_access_token,
+                "title": metadata.title,
+                "description": metadata.description,
+                **self._privacy_params(metadata.privacy),
+            },
+        )
+        finish_resp.raise_for_status()
+        return video_id
 
     def _set_thumbnail_best_effort(self, video_id: str, thumbnail_path) -> None:
         """Same reasoning as youtube.py's _set_thumbnail_best_effort: the
