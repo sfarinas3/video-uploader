@@ -8,27 +8,39 @@
 {% if missed_jobs %}
 <section class="missed-banner">
   <h2>Missed scheduled uploads</h2>
-  <p>The app wasn't running when these were due to publish. Choose an action for each:</p>
-  <table>
-    <thead>
-      <tr><th>Job</th><th>Platform</th><th>Was due</th><th></th></tr>
-    </thead>
-    <tbody>
-      {% for pj, upload_job in missed_jobs %}
-      <tr>
-        <td><a href="/jobs/{{ upload_job.id }}">#{{ upload_job.id }} — {{ upload_job.default_title }}</a></td>
-        <td>{{ pj.platform }}</td>
-        <td>{{ upload_job.scheduled_for | format_datetime }}</td>
-        <td>
-          <form action="/jobs/platform/{{ pj.id }}/retry" method="post" style="display:inline">
-            <button type="submit">Upload now</button>
-          </form>
-          <a href="/jobs/{{ upload_job.id }}/reschedule">Reschedule</a>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <p>
+    The app wasn't running when these were due to publish. Choose an action for each.
+    {% if missed_jobs | length > 1 %}
+    <form action="/jobs/missed/dismiss-all" method="post" style="display:inline">
+      <button type="submit">Dismiss all</button>
+    </form>
+    {% endif %}
+  </p>
+  <div class="missed-jobs-scroll">
+    <table>
+      <thead>
+        <tr><th>Job</th><th>Platform</th><th>Was due</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for pj, upload_job in missed_jobs %}
+        <tr>
+          <td><a href="/jobs/{{ upload_job.id }}">#{{ upload_job.id }} — {{ upload_job.default_title }}</a></td>
+          <td>{{ pj.platform }}</td>
+          <td>{{ upload_job.scheduled_for | format_datetime }}</td>
+          <td>
+            <form action="/jobs/platform/{{ pj.id }}/retry" method="post" style="display:inline">
+              <button type="submit">Upload now</button>
+            </form>
+            <a href="/jobs/{{ upload_job.id }}/reschedule">Reschedule</a>
+            <form action="/jobs/platform/{{ pj.id }}/dismiss-missed" method="post" style="display:inline">
+              <button type="submit">Dismiss</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endif %}
 

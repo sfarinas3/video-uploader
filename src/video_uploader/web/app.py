@@ -97,6 +97,10 @@ THUMBNAIL_SUPPORTED_PLATFORMS = {"youtube", "facebook"}
 # field, independent of whatever keyword is currently being viewed.
 _last_tag_search: dict | None = None
 _selected_upload_tags: list[str] = []
+# Dismissing a missed-upload notification only hides it from the Upload
+# tab's banner -- it's explicitly not a status change (the job stays
+# MISSED in Job status/history), so this is UI-only, in-memory state.
+_dismissed_missed_job_ids: set[int] = set()
 
 WEB_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
@@ -121,9 +125,14 @@ TIMEZONE_NAMES = sorted(zoneinfo.available_timezones())
 
 
 def _missed_platform_jobs(session: Session) -> list[PlatformJob]:
-    return list(
-        session.exec(select(PlatformJob).where(PlatformJob.status == PlatformJobStatus.MISSED))
+    """Jobs still genuinely MISSED and not dismissed from the Upload tab's
+    banner. Dismissing is UI-only (see _dismissed_missed_job_ids) -- it
+    never touches the job's actual status, so it stays MISSED in Job
+    status/history exactly as it happened."""
+    missed = session.exec(
+        select(PlatformJob).where(PlatformJob.status == PlatformJobStatus.MISSED)
     )
+    return [pj for pj in missed if pj.id not in _dismissed_missed_job_ids]
 
 
 def _index_context(error: str | None = None) -> dict:
@@ -269,6 +278,22 @@ def retry_platform_job(platform_job_id: int):
         platform_job = session.get(PlatformJob, platform_job_id)
         upload_job_id = platform_job.upload_job_id if platform_job else None
     return RedirectResponse(url=f"/jobs/{upload_job_id}", status_code=303)
+
+
+@app.post("/jobs/platform/{platform_job_id}/dismiss-missed")
+def dismiss_missed_platform_job(platform_job_id: int):
+    """Hides this job from the Upload tab's missed-uploads banner only --
+    doesn't touch its actual status, so it's untouched in Job status."""
+    _dismissed_missed_job_ids.add(platform_job_id)
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/jobs/missed/dismiss-all")
+def dismiss_all_missed_platform_jobs():
+    with Session(engine) as session:
+        for platform_job in _missed_platform_jobs(session):
+            _dismissed_missed_job_ids.add(platform_job.id)
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/jobs/{upload_job_id}/retry-failed")
