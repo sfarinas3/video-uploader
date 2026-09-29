@@ -570,5 +570,9 @@ def main() -> None:
         width=1100,
         height=850,
         min_size=(700, 500),
+        # pywebview defaults this to False (feels more "native app"-like),
+        # but this app's whole point is showing IDs/URLs/error messages the
+        # user needs to copy elsewhere.
+        text_select=True,
     )
     webview.start()
