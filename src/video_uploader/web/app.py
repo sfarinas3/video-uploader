@@ -76,6 +76,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Video Uploader", lifespan=lifespan)
 
+# TikTok's publisher is fully implemented, but live connection is paused --
+# unaudited apps can only post to a Private account, and the user hasn't
+# decided whether to set up a separate test account for it (see memory).
+# Hidden from the UI rather than ripped out so it's a one-line change to
+# bring back once that's resolved.
+UI_HIDDEN_PLATFORMS = {"tiktok"}
+
 WEB_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=WEB_DIR / "templates")
@@ -111,7 +118,7 @@ def _index_context(error: str | None = None) -> dict:
         # template can read titles without a DetachedInstanceError.
         missed_jobs = [(pj, pj.upload_job) for pj in missed_jobs]
     return {
-        "platforms": [p.value for p in Platform],
+        "platforms": [p.value for p in Platform if p.value not in UI_HIDDEN_PLATFORMS],
         "timezones": TIMEZONE_NAMES,
         "missed_jobs": missed_jobs,
         "error": error,
@@ -375,7 +382,7 @@ def settings(request: Request):
         request,
         "settings.html",
         {
-            "platforms": [p.value for p in Platform],
+            "platforms": [p.value for p in Platform if p.value not in UI_HIDDEN_PLATFORMS],
             "connected": connected,
             "youtube_channel_name": youtube_channel_name,
             "youtube_channel_error": youtube_channel_error,
