@@ -28,9 +28,11 @@ specific constraints.
    ```
    pip install -e .
    ```
-3. `ffmpeg`/`ffprobe` must be installed and on `PATH` — used for
-   pre-flight video validation (duration, codec, aspect ratio) and by the
-   live smoke test scripts in `scripts/`.
+3. No `ffmpeg`/`ffprobe` install needed — pre-flight video validation
+   (duration, codec, aspect ratio) reads video files' metadata directly
+   (see `video_inspect.py`), no external tool involved. `ffmpeg` is only
+   used, optionally, by the live smoke test scripts in `scripts/` to
+   generate a disposable test clip if you don't hand them your own.
 
 ## Running
 

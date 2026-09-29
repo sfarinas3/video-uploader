@@ -6,7 +6,9 @@
 #
 # Output: dist\video-uploader.exe (plus config.example.yaml copied next to
 # it -- config.py resolves config.yaml/data/ relative to the exe's own
-# folder when frozen, not the source tree).
+# folder when frozen, not the source tree). No ffmpeg/ffprobe dependency
+# to bundle -- video_inspect.py reads MP4/MOV metadata directly, no
+# external tool involved.
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
