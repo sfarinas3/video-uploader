@@ -28,11 +28,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
-from video_uploader import desktop_windows, oauth_https_catcher, runtime_settings, scheduler, token_store
+from video_uploader import (
+    desktop_windows,
+    hashtags,
+    oauth_https_catcher,
+    runtime_settings,
+    scheduler,
+    token_store,
+)
 from video_uploader.config import load_config
 from video_uploader.core.engine import CoreEngine
 from video_uploader.core.types import Platform, PlatformJobStatus, PlatformMetadata
 from video_uploader.db import create_db_and_tables, get_engine
+from video_uploader.log_redaction import RedactSecretsFilter
 from video_uploader.models import PlatformJob, UploadJob
 from video_uploader.publishers.facebook import GRAPH_API_VERSION as FACEBOOK_GRAPH_VERSION
 from video_uploader.publishers.tiktok import AUTH_URL as TIKTOK_AUTH_URL
@@ -55,15 +63,20 @@ config.storage.upload_dir.mkdir(parents=True, exist_ok=True)
 # re-running the app under a debugger. 5 x 1MB rotated files is plenty
 # for a single-user local tool.
 config.storage.db_path.parent.mkdir(parents=True, exist_ok=True)
+_log_handlers: list[logging.Handler] = [
+    logging.StreamHandler(),
+    RotatingFileHandler(
+        config.storage.db_path.parent / "app.log", maxBytes=1_000_000, backupCount=5
+    ),
+]
+# httpx logs full request URLs, which carry OAuth secrets/tokens as query
+# params -- mask them before anything is written.
+for _handler in _log_handlers:
+    _handler.addFilter(RedactSecretsFilter())
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        RotatingFileHandler(
-            config.storage.db_path.parent / "app.log", maxBytes=1_000_000, backupCount=5
-        ),
-    ],
+    handlers=_log_handlers,
 )
 
 
@@ -121,8 +134,9 @@ PLATFORM_SHORT_FORM_GUIDELINES = {
 # real persistence. _last_tag_search lets the Tag inspector tab show its
 # last results when you navigate back to it without re-querying YouTube
 # (search.list costs 100 quota units per call). _selected_upload_tags
-# accumulates tags clicked there so they can prefill the Upload tab's Tags
-# field, independent of whatever keyword is currently being viewed.
+# accumulates tags clicked there so they can prefill the Upload tab's
+# Description as hashtags, independent of whatever keyword is currently
+# being viewed.
 _last_tag_search: dict | None = None
 _selected_upload_tags: list[str] = []
 
@@ -144,6 +158,7 @@ def _format_datetime(value: datetime | None) -> str:
 
 
 templates.env.filters["format_datetime"] = _format_datetime
+templates.env.filters["hashtag"] = hashtags.from_phrase
 
 TIMEZONE_NAMES = sorted(zoneinfo.available_timezones())
 
@@ -158,6 +173,13 @@ def _missed_platform_jobs(session: Session) -> list[PlatformJob]:
     )
     dismissed = runtime_settings.get_dismissed_missed_job_ids()
     return [pj for pj in missed if pj.id not in dismissed]
+
+
+def _selected_hashtags_text() -> str:
+    """Tag inspector selections as `#hashtag` text for the Description --
+    YouTube's hidden tags may contain spaces, hashtags can't."""
+    converted = [hashtags.from_phrase(tag).lstrip("#") for tag in _selected_upload_tags]
+    return hashtags.append("", [tag for tag in converted if tag])
 
 
 def _index_context(error: str | None = None) -> dict:
@@ -177,7 +199,7 @@ def _index_context(error: str | None = None) -> dict:
         "timezones": TIMEZONE_NAMES,
         "missed_jobs": missed_jobs,
         "error": error,
-        "selected_tags_csv": ", ".join(_selected_upload_tags),
+        "prefill_description": _selected_hashtags_text(),
         "short_form_guidelines": short_form_guidelines,
         "short_form_guidelines_json": json.dumps(short_form_guidelines),
     }
@@ -194,13 +216,13 @@ def create_job(
     video: UploadFile,
     title: str = Form(...),
     description: str = Form(""),
-    tags: str = Form(""),
     privacy: str = Form("private"),
     platforms: list[str] = Form(default_factory=list),
     when: str = Form("now"),
     scheduled_at: str = Form(""),
     scheduled_tz: str = Form(""),
     thumbnail: UploadFile | None = File(default=None),
+    cover_time_ms: str = Form(""),
 ):
     if not platforms:
         return templates.TemplateResponse(
@@ -228,11 +250,15 @@ def create_job(
     with dest.open("wb") as out:
         shutil.copyfileobj(video.file, out)
 
+    # Set by the Upload tab's frame picker, which also fills `thumbnail`
+    # with that frame as a JPEG for the image-based platforms.
+    cover_ms = int(cover_time_ms) if cover_time_ms.strip().isdigit() else None
+
     default_metadata = PlatformMetadata(
         title=title,
         description=description,
-        tags=[t.strip() for t in tags.split(",") if t.strip()],
         privacy=privacy,
+        cover_time_ms=cover_ms,
     )
 
     default_format_variants = {
@@ -250,9 +276,9 @@ def create_job(
             platform_overrides[platform] = PlatformMetadata(
                 title=title,
                 description=description,
-                tags=default_metadata.tags,
                 privacy=privacy,
                 thumbnail_path=thumb_dest,
+                cover_time_ms=cover_ms,
             )
 
     with Session(engine) as session:
@@ -416,6 +442,7 @@ def tag_inspector(request: Request, keyword: str = ""):
             "tags": tags,
             "error": error,
             "selected_tags": _selected_upload_tags,
+            "selected_hashtags": _selected_hashtags_text(),
         },
     )
 
@@ -423,7 +450,7 @@ def tag_inspector(request: Request, keyword: str = ""):
 @app.post("/tools/tags/toggle")
 def toggle_selected_tag(tag: str = Form(...), keyword: str = Form("")):
     """Clicking a tag in the results table adds/removes it from the set
-    that prefills the Upload tab's Tags field -- accumulates across
+    that prefills the Upload tab's Description as hashtags -- accumulates across
     different keyword searches, not scoped to whichever one is on screen."""
     if tag in _selected_upload_tags:
         _selected_upload_tags.remove(tag)

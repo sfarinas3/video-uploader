@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 
 import httpx
@@ -13,6 +14,8 @@ from video_uploader.core.types import (
     VideoFile,
 )
 from video_uploader.publishers.facebook import GRAPH_API_BASE, GRAPH_API_VERSION
+
+logger = logging.getLogger(__name__)
 
 PLATFORM = "instagram"
 
@@ -55,6 +58,17 @@ UPLOAD_TRANSFER_TIMEOUT_SECONDS = 1800.0
 # threshold (keeps this one code path correct for every file size).
 UPLOAD_CHUNK_SIZE_BYTES = 5 * 1024 * 1024
 
+# Even chunked, rupload intermittently rejects the *final* chunk -- the one
+# that makes Instagram process the assembled file -- with a 400
+# {"debug_info": {"retriable": false, "type": "ProcessingFailedError"}}.
+# Confirmed live (2026-10-14) on one 72MB file: 13 chunks accepted, then the
+# last one failed in roughly 4 of 10 otherwise identical attempts, with or
+# without thumb_offset. "retriable: false" holds for that container only; a
+# fresh container with the same bytes usually succeeds, so that's what's
+# retried. Nothing is published until media_publish, so this can't create
+# duplicate posts.
+CONTAINER_ATTEMPTS = 3
+
 # Same reasoning as facebook.py's TIMEOUT_RECOVERY_WINDOW_MINUTES, but only
 # applied around the media_publish call -- see upload()'s docstring.
 TIMEOUT_RECOVERY_WINDOW_SECONDS = 60
@@ -62,6 +76,15 @@ TIMEOUT_RECOVERY_WINDOW_SECONDS = 60
 
 class InstagramAuthError(RuntimeError):
     """Raised when no stored Instagram credentials exist yet."""
+
+
+class InstagramUploadRejectedError(RuntimeError):
+    """rupload refused a chunk. Carries Instagram's own error body, which
+    raise_for_status() would otherwise drop."""
+
+    def __init__(self, status_code: int, body: str):
+        super().__init__(f"Instagram rejected the video upload (HTTP {status_code}): {body[:300]}")
+        self.retriable_with_new_container = "ProcessingFailedError" in body
 
 
 class InstagramProcessingError(RuntimeError):
@@ -105,7 +128,7 @@ class InstagramPublisher:
             errors.append(
                 "Instagram doesn't support custom thumbnail images via the API "
                 "(only cover_url, which requires public image hosting this tool "
-                "doesn't provide) -- leave the thumbnail blank for Instagram"
+                "doesn't provide) -- pick a frame from the video instead"
             )
 
         if metadata.format_variant and metadata.format_variant not in FORMAT_TO_MEDIA_TYPE:
@@ -130,19 +153,35 @@ class InstagramPublisher:
     def upload(self, video: VideoFile, metadata: PlatformMetadata) -> JobHandle:
         media_type = FORMAT_TO_MEDIA_TYPE.get(metadata.format_variant or "", DEFAULT_MEDIA_TYPE)
 
-        container_resp = self._http.post(
-            f"{GRAPH_API_BASE}/{self._ig_user_id}/media",
-            data={
-                "media_type": media_type,
-                "upload_type": "resumable",
-                "caption": self._caption(metadata),
-                "access_token": self._access_token,
-            },
-        )
-        container_resp.raise_for_status()
-        container_id = container_resp.json()["id"]
+        container_data = {
+            "media_type": media_type,
+            "upload_type": "resumable",
+            "caption": self._caption(metadata),
+            "access_token": self._access_token,
+        }
+        # thumb_offset picks the cover frame by timestamp -- the one cover
+        # option that needs no public image hosting. Stories have no cover.
+        if metadata.cover_time_ms is not None and media_type != "STORIES":
+            container_data["thumb_offset"] = str(metadata.cover_time_ms)
 
-        self._upload_via_rupload_chunks(container_id, video)
+        for attempt in range(1, CONTAINER_ATTEMPTS + 1):
+            container_resp = self._http.post(
+                f"{GRAPH_API_BASE}/{self._ig_user_id}/media", data=container_data
+            )
+            container_resp.raise_for_status()
+            container_id = container_resp.json()["id"]
+            try:
+                self._upload_via_rupload_chunks(container_id, video)
+                break
+            except InstagramUploadRejectedError as exc:
+                if not exc.retriable_with_new_container or attempt == CONTAINER_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "instagram upload attempt %d/%d rejected (%s) -- retrying with a new container",
+                    attempt,
+                    CONTAINER_ATTEMPTS,
+                    exc,
+                )
 
         self._wait_for_container_finished(container_id)
 
@@ -168,7 +207,8 @@ class InstagramPublisher:
         """Transfers video.path to rupload.facebook.com in
         UPLOAD_CHUNK_SIZE_BYTES pieces via the offset/file_size headers.
         200 means the file is fully received; 206 means this chunk landed
-        and more are expected -- both are success, anything else raises."""
+        and more are expected -- both are success, anything else raises
+        InstagramUploadRejectedError."""
         with video.path.open("rb") as fh:
             offset = 0
             while offset < video.size_bytes:
@@ -184,7 +224,7 @@ class InstagramPublisher:
                     timeout=UPLOAD_TRANSFER_TIMEOUT_SECONDS,
                 )
                 if resp.status_code not in (200, 206):
-                    resp.raise_for_status()
+                    raise InstagramUploadRejectedError(resp.status_code, resp.text)
                 offset += len(chunk)
 
     def _wait_for_container_finished(self, container_id: str) -> None:

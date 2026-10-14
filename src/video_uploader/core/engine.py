@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,8 +16,32 @@ from video_uploader.core.types import (
     VideoFile,
 )
 from video_uploader import retry, video_inspect
+from video_uploader.log_redaction import redact
 from video_uploader.models import PlatformJob, UploadJob
 from video_uploader.publishers import PLATFORM_PUBLISHERS
+
+# Platform jobs whose upload is running in this process right now. Retry,
+# "retry failed", the scheduler and the initial run can all reach
+# _run_platform_job from different request/worker threads; without this a
+# second click while an upload is in flight starts a second, overlapping
+# upload of the same job, and whichever finishes last overwrites the other's
+# result. In-memory on purpose: a crash empties it, and the startup sweep
+# (fail_interrupted_uploads) clears the matching stale UPLOADING rows.
+_in_flight_lock = threading.Lock()
+_in_flight_platform_job_ids: set[int] = set()
+
+
+def _claim_in_flight(platform_job_id: int) -> bool:
+    with _in_flight_lock:
+        if platform_job_id in _in_flight_platform_job_ids:
+            return False
+        _in_flight_platform_job_ids.add(platform_job_id)
+        return True
+
+
+def _release_in_flight(platform_job_id: int) -> None:
+    with _in_flight_lock:
+        _in_flight_platform_job_ids.discard(platform_job_id)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +77,6 @@ class CoreEngine:
             video_path=str(video_path),
             default_title=default_metadata.title,
             default_description=default_metadata.description,
-            default_tags=default_metadata.tags,
             default_privacy=default_metadata.privacy,
             scheduled_for=publish_at,
             scheduled_tz=tz,
@@ -71,12 +95,12 @@ class CoreEngine:
                     platform=platform,
                     title_override=override.title if override else None,
                     description_override=override.description if override else None,
-                    tags_override=override.tags if override else None,
                     privacy_override=override.privacy if override else None,
                     thumbnail_path=str(override.thumbnail_path)
                     if override and override.thumbnail_path
                     else None,
                     format_variant=format_variant,
+                    cover_time_ms=(override or default_metadata).cover_time_ms,
                     status=PlatformJobStatus.PENDING,
                 )
             )
@@ -134,6 +158,13 @@ class CoreEngine:
         platform_job = self.session.get(PlatformJob, platform_job_id)
         if platform_job is None:
             raise ValueError(f"No PlatformJob with id {platform_job_id}")
+        if platform_job.id in _in_flight_platform_job_ids:
+            logger.info(
+                "platform=%s job=%s retry ignored: upload already in progress",
+                platform_job.platform,
+                platform_job.id,
+            )
+            return
         upload_job = platform_job.upload_job
         video = self._build_video_file(Path(upload_job.video_path))
         platform_job.retry_count += 1
@@ -156,6 +187,10 @@ class CoreEngine:
         if platform_job is None:
             raise ValueError(f"No PlatformJob with id {platform_job_id}")
         if not platform_job.platform_video_id:
+            if platform_job.status in (PlatformJobStatus.PENDING, PlatformJobStatus.UPLOADING):
+                # No id yet because the upload hasn't finished (or started)
+                # -- nothing to check, and certainly not a failure.
+                return
             self._mark_failed(platform_job, "No platform video id to refresh status for")
             return
 
@@ -212,6 +247,20 @@ class CoreEngine:
         if affected_ids:
             logger.info("startup sweep marked %d upload job(s) missed", len(affected_ids))
         return affected_ids
+
+    def fail_interrupted_uploads(self) -> list[int]:
+        """Startup-only: a platform job still UPLOADING when the app starts
+        was cut off by the app closing or crashing mid-upload -- nothing is
+        running it any more. Mark it FAILED so it can be retried instead of
+        showing as uploading forever."""
+        interrupted = self.session.exec(
+            select(PlatformJob).where(PlatformJob.status == PlatformJobStatus.UPLOADING)
+        ).all()
+        for platform_job in interrupted:
+            platform_job.status = PlatformJobStatus.FAILED
+            platform_job.error_message = "Interrupted: the app closed during the upload -- retry it"
+        self.session.commit()
+        return [platform_job.id for platform_job in interrupted]
 
     def list_due_upload_job_ids(self, as_of: datetime | None = None) -> list[int]:
         """For the poller: upload jobs whose scheduled time has arrived and
@@ -280,16 +329,31 @@ class CoreEngine:
     def _run_platform_job(
         self, platform_job: PlatformJob, upload_job: UploadJob, video: VideoFile
     ) -> None:
+        if not _claim_in_flight(platform_job.id):
+            logger.info(
+                "platform=%s job=%s already uploading -- not starting another",
+                platform_job.platform,
+                platform_job.id,
+            )
+            return
+        try:
+            self._run_platform_job_claimed(platform_job, upload_job, video)
+        finally:
+            _release_in_flight(platform_job.id)
+
+    def _run_platform_job_claimed(
+        self, platform_job: PlatformJob, upload_job: UploadJob, video: VideoFile
+    ) -> None:
         logger.info("platform=%s job=%s starting", platform_job.platform, platform_job.id)
         metadata = PlatformMetadata(
             title=platform_job.title_override or upload_job.default_title,
             description=platform_job.description_override or upload_job.default_description,
-            tags=platform_job.tags_override or upload_job.default_tags,
             privacy=platform_job.privacy_override or upload_job.default_privacy,
             thumbnail_path=Path(platform_job.thumbnail_path)
             if platform_job.thumbnail_path
             else None,
             format_variant=platform_job.format_variant,
+            cover_time_ms=platform_job.cover_time_ms,
         )
 
         publisher_cls = PLATFORM_PUBLISHERS.get(platform_job.platform)
@@ -333,6 +397,10 @@ class CoreEngine:
         self.session.commit()
 
     def _mark_failed(self, platform_job: PlatformJob, message: str) -> None:
+        # Messages are often str(exc) of an httpx error, whose text includes
+        # the request URL -- token query params and all. This is persisted
+        # and shown in the UI, so mask it like the log does.
+        message = redact(message)
         platform_job.status = PlatformJobStatus.FAILED
         platform_job.error_message = message
         self.session.commit()

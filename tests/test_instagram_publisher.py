@@ -6,9 +6,10 @@ from video_uploader.publishers.instagram import InstagramProcessingError, Instag
 
 
 class _FakeResponse:
-    def __init__(self, json_data=None, status_code=200):
+    def __init__(self, json_data=None, status_code=200, text=""):
         self._json_data = json_data if json_data is not None else {}
         self.status_code = status_code
+        self.text = text
 
     def raise_for_status(self):
         pass
@@ -252,3 +253,74 @@ def test_get_permalink(publisher):
         permalink_response=_FakeResponse({"permalink": "https://instagram.com/p/xyz"})
     )
     assert publisher.get_permalink("published123") == "https://instagram.com/p/xyz"
+
+
+@pytest.mark.parametrize(
+    "format_variant,cover_time_ms,expected",
+    [(None, 4250, "4250"), ("reel", 0, "0"), (None, None, None), ("story", 4250, None)],
+)
+def test_upload_sends_cover_frame_as_thumb_offset(
+    publisher, tmp_path, format_variant, cover_time_ms, expected
+):
+    captured = {}
+
+    class CapturingHttpClient(FakeHttpClient):
+        def post(self, url, data=None, headers=None, content=None, timeout=None):
+            if data and "media_type" in data:
+                captured["thumb_offset"] = data.get("thumb_offset")
+            return super().post(url, data=data, headers=headers, content=content)
+
+    publisher._http = CapturingHttpClient()
+    publisher.upload(
+        _video(tmp_path),
+        PlatformMetadata(title="Test", format_variant=format_variant, cover_time_ms=cover_time_ms),
+    )
+    assert captured["thumb_offset"] == expected
+
+
+_PROCESSING_FAILED = (
+    '{"debug_info":{"retriable":false,"type":"ProcessingFailedError",'
+    '"message":"Request processing failed"}}'
+)
+
+
+class _RejectingRuploadClient(FakeHttpClient):
+    """rupload rejects the final chunk for the first `rejections` containers,
+    then accepts -- the intermittent failure seen live."""
+
+    def __init__(self, rejections, body=_PROCESSING_FAILED):
+        super().__init__()
+        self.rejections_left = rejections
+        self.body = body
+        self.containers_created = 0
+
+    def post(self, url, data=None, headers=None, content=None, timeout=None):
+        if "rupload.facebook.com" in url:
+            if self.rejections_left:
+                self.rejections_left -= 1
+                return _FakeResponse(status_code=400, text=self.body)
+            return _FakeResponse({"success": True})
+        if data and "media_type" in data:
+            self.containers_created += 1
+        return super().post(url, data=data, headers=headers, content=content)
+
+
+def test_upload_retries_with_new_container_after_processing_failed(publisher, tmp_path):
+    publisher._http = _RejectingRuploadClient(rejections=2)
+    handle = publisher.upload(_video(tmp_path), PlatformMetadata(title="Test"))
+    assert handle.platform_native_id == "published123"
+    assert publisher._http.containers_created == 3
+
+
+def test_upload_gives_up_after_container_attempts_with_instagram_message(publisher, tmp_path):
+    publisher._http = _RejectingRuploadClient(rejections=instagram.CONTAINER_ATTEMPTS)
+    with pytest.raises(instagram.InstagramUploadRejectedError, match="ProcessingFailedError"):
+        publisher.upload(_video(tmp_path), PlatformMetadata(title="Test"))
+    assert publisher._http.containers_created == instagram.CONTAINER_ATTEMPTS
+
+
+def test_upload_does_not_retry_other_rejections(publisher, tmp_path):
+    publisher._http = _RejectingRuploadClient(rejections=1, body='{"error":"Invalid OAuth token"}')
+    with pytest.raises(instagram.InstagramUploadRejectedError, match="Invalid OAuth token"):
+        publisher.upload(_video(tmp_path), PlatformMetadata(title="Test"))
+    assert publisher._http.containers_created == 1

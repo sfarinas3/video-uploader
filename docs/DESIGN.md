@@ -15,7 +15,9 @@ involved — the app runs entirely on the user's machine.
 
 **Goals**
 - One video in, N platform uploads out, tracked individually.
-- Per-platform metadata (title, description, tags, privacy, thumbnail).
+- Per-platform metadata (title, description, privacy, thumbnail). Hashtags
+  are written inline in the description, as the platforms themselves
+  read them -- there is no separate tags field (see §6).
 - Credentials and tokens stored locally and securely (OS keychain).
 - Easy to add/remove a platform later without touching core logic.
 - Clear, per-platform error reporting — one platform failing must not block
@@ -34,7 +36,7 @@ involved — the app runs entirely on the user's machine.
 | Platform | API | Account requirement | Known constraints |
 |---|---|---|---|
 | YouTube | YouTube Data API v3 (`videos.insert`) | Any Google account | Default quota 10,000 units/day; an upload costs 1,600 units (~6/day) unless quota increase is granted |
-| Facebook | Graph API (`/{page-id}/videos`) | Facebook **Page** (not personal profile) | Publishing permissions need App Review, or the dev app can stay in "development mode" with the user's own account added as a tester |
+| Facebook | Graph API (`/{page-id}/videos`; Reels via `/{page-id}/video_reels`) | Facebook **Page** (not personal profile) | Publishing permissions need App Review, or the dev app can stay in "development mode" with the user's own account added as a tester |
 | Instagram | Instagram Graph API (Content Publishing) | Instagram **Business/Creator** account linked to a Facebook Page | Two-step publish: create media container, then publish it |
 | TikTok | Content Posting API | TikTok Developer app | Unaudited apps can only post as private/self-view; public posting requires TikTok's app audit process |
 
@@ -169,13 +171,22 @@ class Publisher(Protocol):
 
 ## 6. Functional Requirements
 
-1. User can select a local video file and enter title/description/tags.
+1. User can select a local video file and enter title/description.
+   Hashtags go in the description, where YouTube, Facebook and Instagram
+   pick them up. The app extracts them for the two places that need them
+   elsewhere: YouTube's hidden `snippet.tags` (trimmed to its 500-char
+   limit) and TikTok, whose caption is the title only, so description
+   hashtags are appended to it.
 2. User can select which platforms to publish to for a given upload.
 3. User can override metadata per platform (e.g., different title for
    YouTube vs. Instagram caption).
 4. User can optionally attach a custom thumbnail image per platform; if none
    is provided, the platform's own default (e.g., an auto-picked frame) is
-   used.
+   used. Alternatively the user can pick a frame from the video itself in
+   the Upload tab (decoded in the page -- no ffmpeg). That frame goes to
+   YouTube/Facebook as a JPEG thumbnail and to Instagram (`thumb_offset`)
+   and TikTok (`video_cover_timestamp_ms`) as a timestamp, since neither
+   accepts an uploaded cover image without public hosting.
 5. User can choose to publish immediately or schedule the upload for a
    future date/time in a timezone of their choosing (defaulting to the local
    machine's timezone); scheduled jobs persist across app restarts and fire
@@ -192,7 +203,11 @@ class Publisher(Protocol):
 10. User can view the status and any error detail for each platform job,
     including pending and missed scheduled jobs.
 11. User can retry a failed or missed platform job without re-uploading to
-    platforms that already succeeded.
+    platforms that already succeeded. A platform job never has two uploads
+    running at once: a retry while one is in flight is ignored, refreshing
+    a job that hasn't got a platform id yet leaves it alone rather than
+    failing it, and an upload cut off by the app closing is marked failed
+    on the next launch so it can be retried.
 12. On launch, if any scheduled job is `missed`, the app warns the user and
     requires them to choose, per missed job, either "upload now" or
     "reschedule" — a missed job is never auto-published silently.
@@ -221,6 +236,15 @@ class Publisher(Protocol):
   tool cannot automate it (see §3).
 - **Facebook/Instagram**: single-user, own-accounts-only. No multi-user or
   managing-other-accounts support is in scope.
+- **Facebook Reels**: vertical videos up to 90s go up through the Reels
+  endpoint (so they appear in the Page's Reels tab); anything else, or an
+  explicit `video` format, uses the regular video upload. Reels have no
+  hidden/secret mode, so a non-public Reel is saved as a **draft** (listed in
+  Meta Business Suite; confirmed not viewable logged out).
+- **Instagram upload retries**: rupload intermittently rejects the final
+  chunk with `ProcessingFailedError`; the publisher retries with a fresh
+  media container (up to 3 times). Safe because nothing is posted until
+  `media_publish`.
 - **Thumbnails**: optional, per-platform. If omitted, the platform's own
   default behavior applies.
 - **Scheduling**: in scope for v1 as a local scheduler (see §4.4). Not a
@@ -305,4 +329,6 @@ testing policy:
     in project notes); first-party API only, no scraping or third-party
     tag-research services, consistent with §1's no-third-party-server
     principle. Standalone from the publishing flow -- a lookup tool, not
-    part of any PlatformJob.
+    part of any PlatformJob. Tags picked there prefill the Upload tab's
+    description as hashtags (spaces/punctuation removed, e.g.
+    `metal guitar` -> `#metalguitar`).

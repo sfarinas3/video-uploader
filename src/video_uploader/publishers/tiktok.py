@@ -4,7 +4,7 @@ import mimetypes
 
 import httpx
 
-from video_uploader import preflight, token_store
+from video_uploader import hashtags, preflight, token_store
 from video_uploader.config import load_config
 from video_uploader.core.types import (
     JobHandle,
@@ -31,6 +31,16 @@ SCOPES = "video.publish"
 PRIVACY_LEVEL = "SELF_ONLY"
 
 MAX_TITLE_LEN = 2200  # TikTok's limit is UTF-16 code units; approximated with len()
+
+
+def _caption(metadata: PlatformMetadata) -> str:
+    """TikTok's post_info.title is the whole caption -- there's no
+    description. Hashtags are entered in the description (where the other
+    platforms read them), so carry any the title doesn't already have over
+    to the end of it, dropping ones that won't fit."""
+    return hashtags.append(
+        metadata.title, hashtags.extract(metadata.description), max_len=MAX_TITLE_LEN
+    )
 
 
 class TikTokAuthError(RuntimeError):
@@ -142,12 +152,11 @@ class TikTokPublisher:
         if metadata.thumbnail_path:
             # TikTok's only cover mechanism is video_cover_timestamp_ms --
             # a millisecond offset selecting a frame from the uploaded
-            # video itself, not an external image upload. Rejected
-            # outright rather than silently ignored.
+            # video itself (metadata.cover_time_ms), not an external image
+            # upload. Rejected outright rather than silently ignored.
             errors.append(
                 "TikTok's API doesn't support custom thumbnail images -- only frame "
-                "selection from the uploaded video itself, which this tool doesn't "
-                "yet expose -- leave the thumbnail blank for TikTok"
+                "selection from the uploaded video itself -- pick a frame instead"
             )
 
         errors.extend(preflight.check_preflight(video, PLATFORM))
@@ -176,8 +185,13 @@ class TikTokPublisher:
             headers=self._auth_headers(),
             json={
                 "post_info": {
-                    "title": metadata.title,
+                    "title": _caption(metadata),
                     "privacy_level": PRIVACY_LEVEL,
+                    **(
+                        {"video_cover_timestamp_ms": metadata.cover_time_ms}
+                        if metadata.cover_time_ms is not None
+                        else {}
+                    ),
                 },
                 "source_info": {
                     "source": "FILE_UPLOAD",

@@ -19,9 +19,19 @@ _scheduler = AsyncIOScheduler()
 
 def run_startup_sweep() -> None:
     """Mark anything that was due while the app was closed MISSED, once,
-    before the poller starts (DESIGN.md §4.4)."""
+    before the poller starts (DESIGN.md §4.4). Also fails uploads the app
+    was in the middle of when it closed, so they can be retried."""
     with Session(get_engine()) as session:
-        affected = CoreEngine(session).sweep_missed_jobs()
+        core_engine = CoreEngine(session)
+        interrupted = core_engine.fail_interrupted_uploads()
+        affected = core_engine.sweep_missed_jobs()
+
+    if interrupted:
+        logger.warning(
+            "marked %d upload(s) interrupted by the app closing as failed: platform job id(s) %s",
+            len(interrupted),
+            interrupted,
+        )
 
     if affected:
         print(

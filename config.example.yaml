@@ -17,8 +17,8 @@ storage:
   job_history_retention_days: 30
 
 # default_format is the format variant used when a job doesn't set one
-# explicitly (e.g. "standard"/"shorts" for YouTube, "feed"/"reel"/"story"
-# for Instagram). Leave blank to let the publisher auto-detect from the
+# explicitly (e.g. "standard"/"shorts" for YouTube, "reel"/"video" for
+# Facebook, "feed"/"reel"/"story" for Instagram). Leave blank to let the publisher auto-detect from the
 # video instead (auto-detection lands in milestone 8).
 platforms:
   # youtube.client_id/client_secret come from a Google Cloud Console OAuth

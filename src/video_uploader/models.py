@@ -16,6 +16,9 @@ class UploadJob(SQLModel, table=True):
     video_path: str
     default_title: str
     default_description: str = ""
+    # Legacy: tags now live as hashtags in the description (see hashtags.py).
+    # Kept because the column is NOT NULL in existing databases and there's
+    # no migration step -- always written as [].
     default_tags: list[str] = Field(default_factory=list, sa_type=JSON)
     default_privacy: str = "private"
     created_at: datetime = Field(default_factory=utcnow)
@@ -40,9 +43,13 @@ class PlatformJob(SQLModel, table=True):
 
     title_override: str | None = None
     description_override: str | None = None
-    tags_override: list[str] | None = Field(default=None, sa_type=JSON)
+    tags_override: list[str] | None = Field(default=None, sa_type=JSON)  # legacy, unused
     privacy_override: str | None = None
     thumbnail_path: str | None = None
+    # Frame of the video itself to use as the cover, in ms. Sent to the
+    # platforms that select a cover by timestamp (Instagram, TikTok); the
+    # image-based ones get that frame as thumbnail_path instead.
+    cover_time_ms: int | None = None
     # User override, e.g. "shorts"/"standard" (YouTube), "reel"/"feed"/
     # "story" (Instagram). None = publisher auto-detects from the video.
     format_variant: str | None = None

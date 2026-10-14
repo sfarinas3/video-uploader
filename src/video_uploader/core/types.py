@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
@@ -42,9 +42,11 @@ class VideoFile:
 class PlatformMetadata:
     title: str
     description: str = ""
-    tags: list[str] = field(default_factory=list)
     privacy: str = "private"
     thumbnail_path: Path | None = None
+    # Video frame (ms from start) to use as the cover on platforms that pick
+    # covers by timestamp rather than image upload (Instagram, TikTok).
+    cover_time_ms: int | None = None
     # User override for platform-specific format (e.g. "shorts"/"standard"
     # for YouTube, "reel"/"feed"/"story" for Instagram). When None, the
     # publisher auto-detects the variant from the video's properties.

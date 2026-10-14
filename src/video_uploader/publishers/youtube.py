@@ -7,7 +7,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-from video_uploader import preflight, token_store
+from video_uploader import hashtags, preflight, token_store
 from video_uploader.config import load_config
 from video_uploader.core.types import (
     JobHandle,
@@ -24,7 +24,7 @@ TOKEN_URI = "https://oauth2.googleapis.com/token"
 # YouTube Data API v3 metadata limits.
 MAX_TITLE_LEN = 100
 MAX_DESCRIPTION_LEN = 5000
-MAX_TAGS_LEN = 500  # combined character length of all tags
+MAX_TAGS_LEN = 500  # combined character length of all tags, counting separators
 
 # A read timeout waiting for insert()'s response doesn't tell us whether
 # YouTube actually created the video before the connection dropped -- it
@@ -33,6 +33,22 @@ MAX_TAGS_LEN = 500  # combined character length of all tags
 # is how far back to look for a same-titled upload before giving up and
 # reporting a real failure.
 TIMEOUT_RECOVERY_WINDOW_MINUTES = 10
+
+
+def _hidden_tags(metadata: PlatformMetadata) -> list[str]:
+    """YouTube's hidden snippet.tags, filled from the hashtags in the title
+    and description -- there's no separate tags field to type them into.
+    Trimmed to fit MAX_TAGS_LEN (the separator between tags counts toward
+    it) rather than failing the upload over a soft search signal."""
+    tags: list[str] = []
+    used = 0
+    for tag in hashtags.extract(f"{metadata.title}\n{metadata.description}"):
+        cost = len(tag) + (1 if tags else 0)
+        if used + cost > MAX_TAGS_LEN:
+            break
+        tags.append(tag)
+        used += cost
+    return tags
 
 
 class YouTubeAuthError(RuntimeError):
@@ -89,9 +105,6 @@ class YouTubePublisher:
         if len(metadata.description) > MAX_DESCRIPTION_LEN:
             errors.append(f"Description exceeds YouTube's {MAX_DESCRIPTION_LEN}-character limit")
 
-        if sum(len(tag) for tag in metadata.tags) > MAX_TAGS_LEN:
-            errors.append(f"Tags exceed YouTube's combined {MAX_TAGS_LEN}-character limit")
-
         if metadata.thumbnail_path and not metadata.thumbnail_path.exists():
             errors.append(f"Thumbnail file not found: {metadata.thumbnail_path}")
 
@@ -107,7 +120,7 @@ class YouTubePublisher:
             "snippet": {
                 "title": metadata.title,
                 "description": metadata.description,
-                "tags": metadata.tags,
+                "tags": _hidden_tags(metadata),
             },
             "status": {"privacyStatus": metadata.privacy},
         }

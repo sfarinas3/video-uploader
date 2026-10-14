@@ -260,3 +260,92 @@ def test_upload_reraises_timeout_when_recent_upload_title_does_not_match(publish
     )
     with pytest.raises(TimeoutError):
         publisher.upload(_video(tmp_path), PlatformMetadata(title="Test video", privacy="private"))
+
+
+class _ReelsHttpClient:
+    """Fake for the /video_reels start -> rupload -> finish sequence."""
+
+    def __init__(self, rupload_status=None, rupload_body=""):
+        self.reels_calls: list[dict] = []
+        self.rupload_calls: list[dict] = []
+        self.videos_calls = 0
+        self._rupload_status = rupload_status
+        self._rupload_body = rupload_body
+
+    def post(self, url, data=None, files=None, params=None, headers=None, content=None, timeout=None):
+        if url.endswith("/video_reels"):
+            self.reels_calls.append(data)
+            if data["upload_phase"] == "start":
+                return _FakeResponse({"video_id": "reel123", "upload_url": "https://rupload.facebook.com/video-upload/v25.0/reel123"})
+            return _FakeResponse({"success": True})
+        if "rupload.facebook.com" in url:
+            self.rupload_calls.append(headers)
+            if self._rupload_status is not None:
+                response = _FakeResponse(status_code=self._rupload_status)
+                response.text = self._rupload_body
+                return response
+            last = int(headers["offset"]) + len(content) >= int(headers["file_size"])
+            return _FakeResponse({"success": True}, status_code=200 if last else 206)
+        if url.endswith("/thumbnails"):
+            return _FakeResponse({"success": True})
+        self.videos_calls += 1
+        raise AssertionError(f"regular /videos upload used for a reel: {url}")
+
+
+def _vertical_video(tmp_path, size=10, duration=30.0, width=1080, height=1920):
+    video = _video(tmp_path, size=size)
+    video.width, video.height, video.duration_seconds = width, height, duration
+    return video
+
+
+@pytest.mark.parametrize(
+    "width,height,duration,variant,expected",
+    [
+        (1080, 1920, 30.0, None, True),     # vertical short -> reel
+        (1080, 1920, 120.0, None, False),   # too long for a reel
+        (1920, 1080, 30.0, None, False),    # horizontal
+        (None, None, None, None, False),    # unknown -> regular video
+        (1920, 1080, 30.0, "reel", True),   # explicit override
+        (1080, 1920, 30.0, "video", False),
+    ],
+)
+def test_is_reel_detection(tmp_path, width, height, duration, variant, expected):
+    from video_uploader.publishers.facebook import _is_reel
+
+    video = _vertical_video(tmp_path, width=width, height=height, duration=duration)
+    assert _is_reel(video, PlatformMetadata(title="T", format_variant=variant)) is expected
+
+
+@pytest.mark.parametrize("privacy,state", [("private", "DRAFT"), ("unlisted", "DRAFT"), ("public", "PUBLISHED")])
+def test_reel_upload_flow_and_privacy_mapping(publisher, tmp_path, monkeypatch, privacy, state):
+    from video_uploader.publishers import facebook
+
+    monkeypatch.setattr(facebook, "REELS_UPLOAD_CHUNK_SIZE_BYTES", 4)
+    publisher._http = _ReelsHttpClient()
+    handle = publisher.upload(
+        _vertical_video(tmp_path, size=10),
+        PlatformMetadata(title="Riff", description="Words #metal", privacy=privacy),
+    )
+
+    assert handle.platform_native_id == "reel123"
+    assert [h["offset"] for h in publisher._http.rupload_calls] == ["0", "4", "8"]
+    start, finish = publisher._http.reels_calls
+    assert start["upload_phase"] == "start"
+    assert finish["upload_phase"] == "finish"
+    assert finish["video_state"] == state
+    assert finish["title"] == "Riff" and finish["description"] == "Words #metal"
+
+
+def test_reel_upload_error_includes_facebook_message(publisher, tmp_path):
+    from video_uploader.publishers.facebook import FacebookUploadRejectedError
+
+    publisher._http = _ReelsHttpClient(rupload_status=400, rupload_body='{"error":"Video too short"}')
+    with pytest.raises(FacebookUploadRejectedError, match="Video too short"):
+        publisher.upload(_vertical_video(tmp_path), PlatformMetadata(title="T"))
+
+
+def test_validate_rejects_unknown_format_and_overlong_explicit_reel(publisher, tmp_path):
+    assert any("Invalid format_variant" in e for e in publisher.validate(
+        _vertical_video(tmp_path), PlatformMetadata(title="T", format_variant="feed")))
+    assert any("at most 90s" in e for e in publisher.validate(
+        _vertical_video(tmp_path, duration=120.0), PlatformMetadata(title="T", format_variant="reel")))

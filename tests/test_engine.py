@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from video_uploader.core.types import PlatformJobStatus, PlatformMetadata
 from video_uploader.models import PlatformJob, UploadJob
 from video_uploader.publishers import PLATFORM_PUBLISHERS
 
-from conftest import FlakyPublisher
+from conftest import FakePublisher, FlakyPublisher
 
 
 def _submit(core_engine, platforms, **kwargs):
@@ -77,7 +79,7 @@ def test_format_variant_precedence(core_engine, session):
 
 def test_thumbnail_only_override_leaves_other_fields_at_job_defaults(core_engine, session):
     default_metadata = PlatformMetadata(
-        title="Test", description="A description", tags=["a", "b"], privacy="unlisted"
+        title="Test", description="A description", privacy="unlisted"
     )
     job = core_engine.submit_job(
         video_path=Path("does-not-exist.mp4"),
@@ -87,7 +89,6 @@ def test_thumbnail_only_override_leaves_other_fields_at_job_defaults(core_engine
             "youtube": PlatformMetadata(
                 title="Test",
                 description="A description",
-                tags=["a", "b"],
                 privacy="unlisted",
                 thumbnail_path=Path("thumb.jpg"),
             )
@@ -97,7 +98,6 @@ def test_thumbnail_only_override_leaves_other_fields_at_job_defaults(core_engine
     assert youtube_job.thumbnail_path == "thumb.jpg"
     assert youtube_job.title_override == job.default_title
     assert youtube_job.description_override == job.default_description
-    assert youtube_job.tags_override == job.default_tags
     assert youtube_job.privacy_override == job.default_privacy
 
 
@@ -133,9 +133,28 @@ def test_refresh_platform_job_status_does_not_reupload(core_engine, registered_p
     assert youtube_job.status == PlatformJobStatus.PUBLISHED
 
 
-def test_refresh_platform_job_status_without_video_id_fails_clearly(core_engine, session):
-    job = _submit(core_engine, ["youtube"])  # not run -- no platform_video_id yet
+@pytest.mark.parametrize("status", [PlatformJobStatus.PENDING, PlatformJobStatus.UPLOADING])
+def test_refresh_leaves_not_yet_uploaded_job_alone(core_engine, session, status):
+    # No video id yet because the upload hasn't finished -- refreshing then
+    # must not mark it failed (that's what let a retry start a second,
+    # overlapping upload).
+    job = _submit(core_engine, ["youtube"])
     youtube_job = job.platform_jobs[0]
+    youtube_job.status = status
+    session.commit()
+
+    core_engine.refresh_platform_job_status(youtube_job.id)
+    session.refresh(youtube_job)
+
+    assert youtube_job.status == status
+    assert youtube_job.error_message is None
+
+
+def test_refresh_failed_job_without_video_id_fails_clearly(core_engine, session):
+    job = _submit(core_engine, ["youtube"])
+    youtube_job = job.platform_jobs[0]
+    youtube_job.status = PlatformJobStatus.FAILED
+    session.commit()
 
     core_engine.refresh_platform_job_status(youtube_job.id)
     session.refresh(youtube_job)
@@ -289,3 +308,78 @@ def test_purge_old_job_history_is_noop_when_nothing_is_old(
 ):
     _submit(core_engine, ["youtube"])
     assert core_engine.purge_old_job_history(retention_days=30) == []
+
+
+def test_failure_message_masks_tokens(core_engine, session):
+    job = _submit(core_engine, ["facebook"])
+    facebook_job = job.platform_jobs[0]
+
+    core_engine._mark_failed(
+        facebook_job,
+        "Client error '400 Bad Request' for url "
+        "'https://graph.facebook.com/v25.0/123?fields=status&access_token=EAAsecret'",
+    )
+    session.refresh(facebook_job)
+
+    assert "EAAsecret" not in facebook_job.error_message
+    assert "access_token=[REDACTED]" in facebook_job.error_message
+
+
+def test_cover_time_is_stored_and_passed_to_publishers(core_engine, session):
+    job = core_engine.submit_job(
+        video_path=Path("does-not-exist.mp4"),
+        default_metadata=PlatformMetadata(title="Test", cover_time_ms=2500),
+        platforms=["youtube", "instagram"],
+        platform_overrides={
+            "youtube": PlatformMetadata(
+                title="Test", thumbnail_path=Path("thumb.jpg"), cover_time_ms=2500
+            )
+        },
+    )
+    assert {pj.platform: pj.cover_time_ms for pj in job.platform_jobs} == {
+        "youtube": 2500,
+        "instagram": 2500,
+    }
+
+
+def test_retry_while_upload_in_flight_does_not_start_another(
+    core_engine, registered_publishers, session
+):
+    from video_uploader.core import engine as engine_module
+
+    job = _submit(core_engine, ["youtube"])
+    youtube_job = job.platform_jobs[0]
+    engine_module._in_flight_platform_job_ids.add(youtube_job.id)
+    try:
+        core_engine.retry_platform_job(youtube_job.id)
+    finally:
+        engine_module._in_flight_platform_job_ids.discard(youtube_job.id)
+
+    session.refresh(youtube_job)
+    assert youtube_job.status == PlatformJobStatus.PENDING
+    assert youtube_job.retry_count == 0
+    assert FakePublisher.calls == []
+
+
+def test_in_flight_claim_is_released_after_a_run(core_engine, registered_publishers, session):
+    from video_uploader.core import engine as engine_module
+
+    job = _submit(core_engine, ["youtube", "facebook"])
+    core_engine.run_job(job.id)  # youtube succeeds, facebook fails
+
+    assert engine_module._in_flight_platform_job_ids == set()
+
+
+def test_fail_interrupted_uploads_only_touches_uploading_jobs(core_engine, session):
+    job = _submit(core_engine, ["youtube", "facebook"])
+    uploading, pending = job.platform_jobs
+    uploading.status = PlatformJobStatus.UPLOADING
+    session.commit()
+
+    assert core_engine.fail_interrupted_uploads() == [uploading.id]
+
+    session.refresh(uploading)
+    session.refresh(pending)
+    assert uploading.status == PlatformJobStatus.FAILED
+    assert "Interrupted" in uploading.error_message
+    assert pending.status == PlatformJobStatus.PENDING

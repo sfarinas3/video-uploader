@@ -307,3 +307,20 @@ def test_find_top_tags_skips_videos_with_no_tags(publisher):
 def test_find_top_tags_returns_empty_for_no_search_results(publisher):
     publisher._youtube = FakeYouTubeClient(search_response={"items": []})
     assert publisher.find_top_tags("nonsense keyword") == []
+
+
+def test_hidden_tags_come_from_title_and_description_hashtags():
+    from video_uploader.publishers.youtube import _hidden_tags
+
+    metadata = PlatformMetadata(title="Riff #shorts", description="Words\n\n#metal #djent #Metal")
+    assert _hidden_tags(metadata) == ["shorts", "metal", "djent"]
+
+
+def test_hidden_tags_are_trimmed_to_the_combined_limit():
+    from video_uploader.publishers.youtube import MAX_TAGS_LEN, _hidden_tags
+
+    description = " ".join(f"#tag{i:03d}{'x' * 40}" for i in range(20))
+    tags = _hidden_tags(PlatformMetadata(title="Test", description=description))
+    assert 0 < len(tags) < 20
+    assert sum(len(t) for t in tags) + len(tags) - 1 <= MAX_TAGS_LEN
+    assert tags[0].startswith("tag000")

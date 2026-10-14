@@ -29,9 +29,37 @@ RESUMABLE_UPLOAD_TRANSFER_TIMEOUT_SECONDS = 1800.0
 # failure mode for real with YouTube; applying the fix proactively here).
 TIMEOUT_RECOVERY_WINDOW_MINUTES = 10
 
+# Reels go through their own endpoint (/{page_id}/video_reels) -- a vertical
+# clip sent to /videos lands as a regular video and never shows in the
+# Page's Reels tab. format_variant "reel"/"video" forces one or the other;
+# with neither, vertical videos up to Facebook's Reels length limit go up as
+# Reels and everything else as a regular video.
+REELS_MAX_DURATION_SECONDS = 90
+FORMAT_VARIANTS = ("reel", "video")
+REELS_RUPLOAD_BASE = f"https://rupload.facebook.com/video-upload/{GRAPH_API_VERSION}"
+# Same offset/file_size chunking as instagram.py's rupload transfer
+# (confirmed live for Reels too: 206 per partial chunk, 200 on the last).
+REELS_UPLOAD_CHUNK_SIZE_BYTES = 5 * 1024 * 1024
+
 
 class FacebookAuthError(RuntimeError):
     """Raised when no stored Facebook Page credentials exist yet."""
+
+
+class FacebookUploadRejectedError(RuntimeError):
+    """A Reels upload step was refused. Carries Facebook's own error body,
+    which raise_for_status() would otherwise drop."""
+
+    def __init__(self, step: str, status_code: int, body: str):
+        super().__init__(f"Facebook rejected the Reel {step} (HTTP {status_code}): {body[:300]}")
+
+
+def _is_reel(video: VideoFile, metadata: PlatformMetadata) -> bool:
+    if metadata.format_variant:
+        return metadata.format_variant == "reel"
+    if not (video.width and video.height and video.duration_seconds):
+        return False  # can't tell -- a regular video is the safe default
+    return video.height > video.width and video.duration_seconds <= REELS_MAX_DURATION_SECONDS
 
 
 def complete_oauth(code: str, redirect_uri: str) -> dict:
@@ -163,6 +191,21 @@ class FacebookPublisher:
         if metadata.privacy not in ("private", "unlisted", "public"):
             errors.append(f"Invalid privacy value: {metadata.privacy!r}")
 
+        if metadata.format_variant and metadata.format_variant not in FORMAT_VARIANTS:
+            errors.append(
+                f"Invalid format_variant: {metadata.format_variant!r} "
+                f"(expected one of {', '.join(FORMAT_VARIANTS)})"
+            )
+        elif (
+            metadata.format_variant == "reel"
+            and video.duration_seconds
+            and video.duration_seconds > REELS_MAX_DURATION_SECONDS
+        ):
+            errors.append(
+                f"Facebook Reels can be at most {REELS_MAX_DURATION_SECONDS}s "
+                f"(this video is {round(video.duration_seconds)}s) -- use the 'video' format instead"
+            )
+
         errors.extend(preflight.check_preflight(video, PLATFORM))
 
         return errors
@@ -172,8 +215,8 @@ class FacebookPublisher:
         a Page has no "friends" audience, so every Page video is public-
         facing to some degree. "private" here maps to the most restricted
         option the Graph API actually offers (published=false, secret=true:
-        hidden from the Page's timeline and from search, but still viewable
-        by anyone with the direct permalink) -- not true access control.
+        hidden from the Page's timeline and from search; confirmed live
+        2026-10-14 that its permalink isn't viewable logged out either).
         Confirmed live: the video object's own `privacy` field still reads
         "EVERYONE" even with these params set, which appears to be a
         vestigial field from this endpoint's personal-profile-upload days
@@ -186,8 +229,9 @@ class FacebookPublisher:
         return {"published": "true"}
 
     def upload(self, video: VideoFile, metadata: PlatformMetadata) -> JobHandle:
+        upload_fn = self._upload_reel if _is_reel(video, metadata) else self._upload_via_chunked_protocol
         try:
-            video_id = self._upload_via_chunked_protocol(video, metadata)
+            video_id = upload_fn(video, metadata)
         except (TimeoutError, ConnectionError, httpx.TimeoutException):
             recovered_id = self._find_recently_uploaded_video(metadata.title)
             if recovered_id is None:
@@ -268,6 +312,56 @@ class FacebookPublisher:
             },
         )
         finish_resp.raise_for_status()
+        return video_id
+
+    def _upload_reel(self, video: VideoFile, metadata: PlatformMetadata) -> str:
+        """Page Reels publishing (developers.facebook.com/docs/video-api/
+        guides/reels-publishing): start -> rupload transfer -> finish.
+        Reels have no published=false/secret mode, so anything other than
+        "public" is finished as a DRAFT: unpublished, listed in Meta
+        Business Suite for the Page's admins, and -- confirmed live
+        2026-10-14 -- not viewable logged out via its /reel/ permalink."""
+        start_resp = self._http.post(
+            f"{GRAPH_API_BASE}/{self._page_id}/video_reels",
+            data={"upload_phase": "start", "access_token": self._page_access_token},
+        )
+        if start_resp.status_code != 200:
+            raise FacebookUploadRejectedError("start", start_resp.status_code, start_resp.text)
+        start_data = start_resp.json()
+        video_id = start_data["video_id"]
+        upload_url = start_data.get("upload_url") or f"{REELS_RUPLOAD_BASE}/{video_id}"
+
+        with video.path.open("rb") as fh:
+            offset = 0
+            while offset < video.size_bytes:
+                chunk = fh.read(REELS_UPLOAD_CHUNK_SIZE_BYTES)
+                resp = self._http.post(
+                    upload_url,
+                    headers={
+                        "Authorization": f"OAuth {self._page_access_token}",
+                        "offset": str(offset),
+                        "file_size": str(video.size_bytes),
+                    },
+                    content=chunk,
+                    timeout=RESUMABLE_UPLOAD_TRANSFER_TIMEOUT_SECONDS,
+                )
+                if resp.status_code not in (200, 206):
+                    raise FacebookUploadRejectedError("upload", resp.status_code, resp.text)
+                offset += len(chunk)
+
+        finish_resp = self._http.post(
+            f"{GRAPH_API_BASE}/{self._page_id}/video_reels",
+            data={
+                "upload_phase": "finish",
+                "video_id": video_id,
+                "video_state": "PUBLISHED" if metadata.privacy == "public" else "DRAFT",
+                "title": metadata.title,
+                "description": metadata.description,
+                "access_token": self._page_access_token,
+            },
+        )
+        if finish_resp.status_code != 200:
+            raise FacebookUploadRejectedError("finish", finish_resp.status_code, finish_resp.text)
         return video_id
 
     def _set_thumbnail_best_effort(self, video_id: str, thumbnail_path) -> None:

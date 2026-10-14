@@ -173,3 +173,26 @@ def test_get_status_maps_failure_with_reason(publisher):
     result = publisher.get_status(JobHandle(platform_job_id=1, platform_native_id="publish123"))
     assert result.status == PlatformJobStatus.FAILED
     assert result.error_message == "video_pull_failed"
+
+
+def test_upload_caption_carries_description_hashtags_onto_title(publisher, tmp_path):
+    publisher.upload(
+        _video(tmp_path),
+        PlatformMetadata(title="Riff #metal", description="Long text\n\n#Metal #djent #guitar"),
+    )
+    assert publisher._http.captured_init_body["post_info"]["title"] == "Riff #metal #djent #guitar"
+
+
+def test_upload_caption_is_just_title_without_description_hashtags(publisher, tmp_path):
+    publisher.upload(_video(tmp_path), PlatformMetadata(title="Riff", description="No tags here"))
+    assert publisher._http.captured_init_body["post_info"]["title"] == "Riff"
+
+
+def test_upload_sends_cover_frame_timestamp_when_picked(publisher, tmp_path):
+    publisher.upload(_video(tmp_path), PlatformMetadata(title="Test", cover_time_ms=1500))
+    assert publisher._http.captured_init_body["post_info"]["video_cover_timestamp_ms"] == 1500
+
+
+def test_upload_omits_cover_timestamp_when_not_picked(publisher, tmp_path):
+    publisher.upload(_video(tmp_path), PlatformMetadata(title="Test"))
+    assert "video_cover_timestamp_ms" not in publisher._http.captured_init_body["post_info"]
