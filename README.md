@@ -30,9 +30,12 @@ specific constraints.
    ```
 3. No `ffmpeg`/`ffprobe` install needed — pre-flight video validation
    (duration, codec, aspect ratio) reads video files' metadata directly
-   (see `video_inspect.py`), no external tool involved. `ffmpeg` is only
-   used, optionally, by the live smoke test scripts in `scripts/` to
-   generate a disposable test clip if you don't hand them your own.
+   (see `video_inspect.py`), no external tool involved. `ffmpeg` is
+   optional: if it's on PATH, videos above Instagram's 1080px resolution
+   cap (e.g. 4K) are downscaled automatically for Instagram only; without
+   it such videos fail Instagram's pre-flight check. The live smoke test
+   scripts in `scripts/` also use it to generate a disposable test clip if
+   you don't hand them your own.
 
 ## Running
 

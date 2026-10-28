@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
+import tempfile
 import time
+from pathlib import Path
 
 import httpx
 
-from video_uploader import preflight, token_store
+from video_uploader import preflight, token_store, video_transcode
 from video_uploader.core.types import (
     JobHandle,
     JobStatus,
@@ -58,20 +61,33 @@ UPLOAD_TRANSFER_TIMEOUT_SECONDS = 1800.0
 # threshold (keeps this one code path correct for every file size).
 UPLOAD_CHUNK_SIZE_BYTES = 5 * 1024 * 1024
 
-# Even chunked, rupload intermittently rejects the *final* chunk -- the one
-# that makes Instagram process the assembled file -- with a 400
-# {"debug_info": {"retriable": false, "type": "ProcessingFailedError"}}.
-# Confirmed live (2026-10-14) on one 72MB file: 13 chunks accepted, then the
-# last one failed in roughly 4 of 10 otherwise identical attempts, with or
-# without thumb_offset. "retriable: false" holds for that container only; a
-# fresh container with the same bytes usually succeeds, so that's what's
-# retried. Nothing is published until media_publish, so this can't create
+# rupload can reject the *final* chunk -- the one that makes Instagram
+# process the assembled file -- with a 400 {"debug_info": {"retriable":
+# false, "type": "ProcessingFailedError"}}. First seen (2026-10-14) on a
+# 72MB file failing ~4 of 10 attempts and taken for intermittent; the
+# 2026-10-27 bisection showed that file's 2160x3840 resolution was the real
+# cause (by then failing every attempt) -- now caught by preflight's
+# max_short_side_px and downscaled in upload(). The fresh-container retry
+# stays as cheap insurance: "retriable: false" holds for that container
+# only, and nothing is published until media_publish, so it can't create
 # duplicate posts.
 CONTAINER_ATTEMPTS = 3
+
+# Shorter-side cap a source is downscaled to before upload -- see
+# preflight.py's instagram limits for how it was established.
+MAX_SHORT_SIDE_PX = preflight.PLATFORM_LIMITS[PLATFORM]["max_short_side_px"]
 
 # Same reasoning as facebook.py's TIMEOUT_RECOVERY_WINDOW_MINUTES, but only
 # applied around the media_publish call -- see upload()'s docstring.
 TIMEOUT_RECOVERY_WINDOW_SECONDS = 60
+
+
+def _needs_downscale(video: VideoFile) -> bool:
+    return (
+        video.width is not None
+        and video.height is not None
+        and min(video.width, video.height) > MAX_SHORT_SIDE_PX
+    )
 
 
 class InstagramAuthError(RuntimeError):
@@ -139,7 +155,22 @@ class InstagramPublisher:
         # metadata.privacy is intentionally accepted without validation
         # here; it's simply not sent to the API.
 
-        errors.extend(preflight.check_preflight(video, PLATFORM))
+        # Preflight judges the file Instagram will actually receive: an
+        # oversized source is fine when upload() can downscale it.
+        checked = video
+        if _needs_downscale(video):
+            if video_transcode.find_ffmpeg():
+                width, height = video_transcode.scaled_dimensions(
+                    video.width, video.height, MAX_SHORT_SIDE_PX
+                )
+                checked = dataclasses.replace(video, width=width, height=height)
+            else:
+                errors.append(
+                    "Install ffmpeg (on PATH) to have this app downscale the video for "
+                    f"Instagram automatically, or export a copy at {MAX_SHORT_SIDE_PX}px "
+                    "on the shorter side (e.g. 1080x1920)"
+                )
+        errors.extend(preflight.check_preflight(checked, PLATFORM))
 
         return errors
 
@@ -151,6 +182,27 @@ class InstagramPublisher:
         return description or title
 
     def upload(self, video: VideoFile, metadata: PlatformMetadata) -> JobHandle:
+        if not _needs_downscale(video):
+            return self._upload(video, metadata)
+        # Only Instagram gets the smaller copy; the other platforms keep the
+        # original. Temp file is gone once the upload (and publish) returns.
+        with tempfile.TemporaryDirectory(prefix="video-uploader-ig-") as tmp:
+            width, height = video_transcode.scaled_dimensions(
+                video.width, video.height, MAX_SHORT_SIDE_PX
+            )
+            logger.info(
+                "instagram: downscaling %dx%d -> %dx%d before upload",
+                video.width, video.height, width, height,
+            )
+            dest = video_transcode.downscale(
+                video.path, Path(tmp) / "instagram.mp4", MAX_SHORT_SIDE_PX
+            )
+            scaled = dataclasses.replace(
+                video, path=dest, size_bytes=dest.stat().st_size, width=width, height=height
+            )
+            return self._upload(scaled, metadata)
+
+    def _upload(self, video: VideoFile, metadata: PlatformMetadata) -> JobHandle:
         media_type = FORMAT_TO_MEDIA_TYPE.get(metadata.format_variant or "", DEFAULT_MEDIA_TYPE)
 
         container_data = {

@@ -101,3 +101,22 @@ def test_other_platforms_have_no_aspect_ratio_check():
     assert check_preflight(video, "youtube") == []
     assert check_preflight(video, "facebook") == []
     assert check_preflight(video, "tiktok") == []
+
+
+@pytest.mark.parametrize("width,height", [(2160, 3840), (3840, 2160)])
+def test_instagram_rejects_resolution_above_short_side_cap(width, height):
+    video = _video(width=width, height=height)
+    errors = check_preflight(video, "instagram")
+    assert any("resolution" in e for e in errors)
+
+
+@pytest.mark.parametrize("width,height", [(1080, 1920), (1920, 1080)])
+def test_instagram_accepts_1080_short_side(width, height):
+    assert check_preflight(_video(width=width, height=height), "instagram") == []
+
+
+def test_other_platforms_have_no_resolution_check():
+    video = _video(width=2160, height=3840)
+    assert check_preflight(video, "youtube") == []
+    assert check_preflight(video, "facebook") == []
+    assert check_preflight(video, "tiktok") == []

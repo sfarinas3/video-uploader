@@ -36,6 +36,15 @@ PLATFORM_LIMITS: dict[str, dict] = {
         # confirmed live.
         "max_size_bytes": 300 * 1024**2,
         "allowed_codecs": {"h264", "hevc"},
+        # Bisected live (2026-10-27) with one clip re-encoded several ways:
+        # 2160x3840 is rejected every time with rupload's bare
+        # "ProcessingFailedError" on the final chunk regardless of bitrate
+        # (5 or 22 Mbps) or moov placement, while 1080x1920 passes every
+        # time even at the source's 22 Mbps / 77MB. Shorter side rather than
+        # width so landscape sources are held to the same bound; 1080 is the
+        # confirmed-safe value -- anything in (1080, 2160) is untested.
+        # instagram.py downscales automatically when ffmpeg is available.
+        "max_short_side_px": 1080,
         "min_aspect_ratio": 0.01,
         "max_aspect_ratio": 10.0,
     },
@@ -78,6 +87,14 @@ def check_preflight(video: VideoFile, platform: str) -> list[str]:
             errors.append(
                 f"Video codec {video.codec!r} isn't supported by {platform} "
                 f"(allowed: {sorted(allowed_codecs)})"
+            )
+
+    max_short_side = limits.get("max_short_side_px")
+    if max_short_side is not None and video.width is not None and video.height is not None:
+        if min(video.width, video.height) > max_short_side:
+            errors.append(
+                f"Video resolution ({video.width}x{video.height}) exceeds {platform}'s "
+                f"{max_short_side}px maximum on the shorter side"
             )
 
     if video.width is not None and video.height is not None and video.height > 0:

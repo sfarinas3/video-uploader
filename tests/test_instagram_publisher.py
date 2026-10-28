@@ -324,3 +324,57 @@ def test_upload_does_not_retry_other_rejections(publisher, tmp_path):
     with pytest.raises(instagram.InstagramUploadRejectedError, match="Invalid OAuth token"):
         publisher.upload(_video(tmp_path), PlatformMetadata(title="Test"))
     assert publisher._http.containers_created == 1
+
+
+def _video_4k(tmp_path):
+    video = _video(tmp_path)
+    video.width, video.height = 2160, 3840
+    return video
+
+
+def test_validate_accepts_oversized_video_when_ffmpeg_can_downscale(publisher, tmp_path, monkeypatch):
+    monkeypatch.setattr(instagram.video_transcode, "find_ffmpeg", lambda: "ffmpeg")
+    assert publisher.validate(_video_4k(tmp_path), PlatformMetadata(title="Test")) == []
+
+
+def test_validate_rejects_oversized_video_without_ffmpeg(publisher, tmp_path, monkeypatch):
+    monkeypatch.setattr(instagram.video_transcode, "find_ffmpeg", lambda: None)
+    errors = publisher.validate(_video_4k(tmp_path), PlatformMetadata(title="Test"))
+    assert any("resolution" in e for e in errors)
+    assert any("ffmpeg" in e for e in errors)
+
+
+def test_upload_sends_downscaled_copy_of_oversized_video(publisher, tmp_path, monkeypatch):
+    calls = []
+
+    def fake_downscale(src, dest, max_short_side):
+        calls.append((src, max_short_side))
+        dest.write_bytes(b"small")
+        return dest
+
+    monkeypatch.setattr(instagram.video_transcode, "downscale", fake_downscale)
+    uploaded = []
+
+    class CapturingHttpClient(FakeHttpClient):
+        def post(self, url, data=None, headers=None, content=None, timeout=None):
+            if "rupload.facebook.com" in url:
+                uploaded.append((headers["file_size"], content))
+            return super().post(url, data=data, headers=headers, content=content)
+
+    publisher._http = CapturingHttpClient()
+    video = _video_4k(tmp_path)
+    handle = publisher.upload(video, PlatformMetadata(title="Test"))
+
+    assert handle.platform_native_id == "published123"
+    assert calls == [(video.path, instagram.MAX_SHORT_SIDE_PX)]
+    assert uploaded == [("5", b"small")]
+
+
+def test_upload_does_not_downscale_in_spec_video(publisher, tmp_path, monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("downscale should not run")
+
+    monkeypatch.setattr(instagram.video_transcode, "downscale", fail)
+    video = _video(tmp_path)
+    video.width, video.height = 1080, 1920
+    publisher.upload(video, PlatformMetadata(title="Test"))

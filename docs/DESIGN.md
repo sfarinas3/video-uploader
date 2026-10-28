@@ -241,10 +241,16 @@ class Publisher(Protocol):
   explicit `video` format, uses the regular video upload. Reels have no
   hidden/secret mode, so a non-public Reel is saved as a **draft** (listed in
   Meta Business Suite; confirmed not viewable logged out).
-- **Instagram upload retries**: rupload intermittently rejects the final
-  chunk with `ProcessingFailedError`; the publisher retries with a fresh
-  media container (up to 3 times). Safe because nothing is posted until
-  `media_publish`.
+- **Instagram resolution cap**: rupload rejects the final chunk with a bare
+  `ProcessingFailedError` for any video above 1080px on the shorter side
+  (bisected live 2026-10-27: 2160x3840 always fails, 1080x1920 always
+  passes, bitrate and moov placement irrelevant). Preflight enforces it;
+  when `ffmpeg` is on PATH the publisher instead uploads a temporary
+  downscaled copy (H.264 CRF 18, faststart) to Instagram only, leaving the
+  original for the other platforms. This is the one optional ffmpeg use.
+- **Instagram upload retries**: on `ProcessingFailedError` the publisher
+  still retries with a fresh media container (up to 3 times) as insurance.
+  Safe because nothing is posted until `media_publish`.
 - **Thumbnails**: optional, per-platform. If omitted, the platform's own
   default behavior applies.
 - **Scheduling**: in scope for v1 as a local scheduler (see §4.4). Not a
