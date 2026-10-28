@@ -5,7 +5,7 @@
 ; directly -- that script builds dist\video-uploader.exe first.
 
 #define MyAppName "Video Uploader"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #define MyAppExeName "video-uploader.exe"
 
 [Setup]
